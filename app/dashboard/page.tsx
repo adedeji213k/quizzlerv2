@@ -1,43 +1,81 @@
-"use client";
+'use client';
 
 import { useEffect, useState } from "react";
-import { LogOut, ClipboardList, BookOpen, BarChart2, Sparkles } from "lucide-react";
+import { LogOut, ClipboardList, BookOpen, BarChart2, Sparkles, CreditCard } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import TakeQuiz from "../components/TakeQuiz";
 import MyQuizzes from "../components/MyQuizzes";
 import Results from "../components/Results";
+import SubscriptionManager from "../components/SubscriptionManager";
+
+interface SubscriptionInfo {
+  plan: string;
+  expires: string;
+}
 
 export default function DashboardPage() {
   const [active, setActive] = useState("takeQuiz");
   const [loading, setLoading] = useState(true);
+  const [subscription, setSubscription] = useState<SubscriptionInfo | null>(null);
+  const [showSubscriptionManager, setShowSubscriptionManager] = useState(false);
   const router = useRouter();
 
-  // ✅ Redirect to login if not authenticated
   useEffect(() => {
     const checkSession = async () => {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+      const { data: { session } } = await supabase.auth.getSession();
 
       if (!session) {
         router.push("/login");
-      } else {
+        return;
+      }
+
+      try {
+        const { data: subData, error } = await supabase
+          .from("subscriptions")
+          .select(`
+            status,
+            current_period_end,
+            plans(name)
+          `)
+          .eq("user_id", session.user.id)
+          .single();
+
+        if (!error && subData) {
+          // subData.plans can be an array or null
+          const planObj = Array.isArray(subData.plans) ? subData.plans[0] : subData.plans;
+
+          setSubscription({
+            plan: planObj?.name ?? "Unknown Plan",
+            expires: subData.current_period_end
+              ? new Date(subData.current_period_end).toLocaleDateString()
+              : "N/A",
+          });
+        }
+      } catch (err: any) {
+        console.error("Error fetching subscription data:", err);
+      } finally {
         setLoading(false);
       }
     };
 
     checkSession();
 
-    // Optional: subscribe to auth state changes (logout in another tab, etc.)
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       if (!session) router.push("/login");
     });
 
-    return () => {
-      listener.subscription.unsubscribe();
-    };
+    return () => listener.subscription.unsubscribe();
   }, [router]);
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    router.push("/login");
+  };
+
+  const handleShowSubscription = () => {
+    setShowSubscriptionManager(true);
+  };
 
   const menuItems = [
     { id: "takeQuiz", label: "Take Quiz", icon: <ClipboardList size={18} /> },
@@ -45,32 +83,16 @@ export default function DashboardPage() {
     { id: "results", label: "Results", icon: <BarChart2 size={18} /> },
   ];
 
-  // ✅ Supabase logout
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    router.push("/login");
-  };
-
   const renderContent = () => {
+    if (showSubscriptionManager) return <SubscriptionManager />;
     switch (active) {
-      case "takeQuiz":
-        return (
-          <TakeQuiz/>
-        );
-      case "myQuizzes":
-        return (
-          <MyQuizzes/>
-        );
-      case "results":
-        return (
-          <Results/>
-        );
-      default:
-        return null;
+      case "takeQuiz": return <TakeQuiz />;
+      case "myQuizzes": return <MyQuizzes />;
+      case "results": return <Results />;
+      default: return null;
     }
   };
 
-  // Show a loader while checking session
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-background text-foreground">
@@ -100,7 +122,7 @@ export default function DashboardPage() {
           {menuItems.map((item) => (
             <button
               key={item.id}
-              onClick={() => setActive(item.id)}
+              onClick={() => { setActive(item.id); setShowSubscriptionManager(false); }}
               className={`flex items-center w-full px-4 py-3 rounded-lg text-sm font-medium transition-all duration-200 ${
                 active === item.id
                   ? "bg-gradient-to-r from-primary/10 to-accent/10 text-primary shadow-sm"
@@ -113,11 +135,21 @@ export default function DashboardPage() {
           ))}
         </nav>
 
-        {/* Logout */}
-        <div className="p-4 border-t border-border">
+        {/* Subscription & Logout */}
+        <div className="p-4 border-t border-border space-y-2">
+          <button
+            onClick={handleShowSubscription}
+            className="flex items-center w-full px-4 py-2 text-sm font-medium bg-primary/10 text-primary rounded-lg hover:bg-primary/20 transition"
+          >
+            <CreditCard size={18} className="mr-3" />
+            {subscription
+              ? `Plan: ${subscription.plan} (expires ${subscription.expires})`
+              : "View / Upgrade Plan"}
+          </button>
+
           <button
             onClick={handleLogout}
-            className="flex items-center w-full px-4 py-2 text-sm font-medium text-destructive rounded-lg hover:bg-destructive/10 transition-all duration-200"
+            className="flex items-center w-full px-4 py-2 text-sm font-medium text-destructive rounded-lg hover:bg-destructive/10 transition"
           >
             <LogOut size={18} className="mr-3" /> Logout
           </button>
@@ -131,7 +163,6 @@ export default function DashboardPage() {
         </div>
       </main>
 
-      {/* Background glow effect */}
       <div className="absolute inset-0 -z-10 bg-[radial-gradient(circle_at_bottom_right,hsl(var(--accent)/0.1),transparent_70%)]"></div>
     </div>
   );

@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 import { useState } from "react";
 import { Sparkles, Eye, EyeOff, UserPlus } from "lucide-react";
@@ -33,29 +33,44 @@ export default function RegisterPage() {
 
     setLoading(true);
 
-    // ✅ Register user with Supabase
-    const { data, error } = await supabase.auth.signUp({
-      email: form.email,
-      password: form.password,
-      options: {
-        // Save the full name in metadata → trigger reads this to create profile
-        data: { full_name: form.name },
-        emailRedirectTo: `${window.location.origin}/dashboard`,
-      },
-    });
+    try {
+      // 1️⃣ Register user with Supabase Auth
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email: form.email,
+        password: form.password,
+        options: {
+          data: { name: form.name },
+          emailRedirectTo: `${window.location.origin}/dashboard`,
+        },
+      });
 
-    setLoading(false);
+      if (authError) throw authError;
+      if (!authData.user) throw new Error("Signup failed");
 
-    if (error) {
-      alert(error.message);
-      return;
-    }
+      // 2️⃣ Insert user into `users` table
+      const { error: insertError } = await supabase.from("users").insert({
+        id: authData.user.id,
+        email: authData.user.email,
+        name: form.name,
+        role: "free",
+      });
 
-    if (data.user) {
+      if (insertError) {
+        // ❌ Rollback: delete the auth user if inserting into `users` fails
+        await supabase.auth.admin.deleteUser(authData.user.id);
+        throw new Error("Failed to register user in database. Registration rolled back.");
+      }
+
       alert(
         "Registration successful! Please check your email for a verification link before logging in."
       );
       router.push("/login");
+
+    } catch (err: any) {
+      console.error("Registration error:", err);
+      alert(err.message || "Failed to register");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -83,12 +98,7 @@ export default function RegisterPage() {
         <form onSubmit={handleSubmit} className="space-y-6">
           {/* Full Name */}
           <div>
-            <label
-              htmlFor="name"
-              className="block text-sm font-medium mb-1 text-foreground"
-            >
-              Full Name
-            </label>
+            <label htmlFor="name" className="block text-sm font-medium mb-1 text-foreground">Full Name</label>
             <input
               id="name"
               name="name"
@@ -103,12 +113,7 @@ export default function RegisterPage() {
 
           {/* Email */}
           <div>
-            <label
-              htmlFor="email"
-              className="block text-sm font-medium mb-1 text-foreground"
-            >
-              Email
-            </label>
+            <label htmlFor="email" className="block text-sm font-medium mb-1 text-foreground">Email</label>
             <input
               id="email"
               name="email"
@@ -123,12 +128,7 @@ export default function RegisterPage() {
 
           {/* Password */}
           <div>
-            <label
-              htmlFor="password"
-              className="block text-sm font-medium mb-1 text-foreground"
-            >
-              Password
-            </label>
+            <label htmlFor="password" className="block text-sm font-medium mb-1 text-foreground">Password</label>
             <div className="relative">
               <input
                 id="password"
@@ -145,23 +145,14 @@ export default function RegisterPage() {
                 onClick={() => setShowPassword(!showPassword)}
                 className="absolute inset-y-0 right-3 flex items-center text-muted-foreground hover:text-foreground"
               >
-                {showPassword ? (
-                  <EyeOff className="w-5 h-5" />
-                ) : (
-                  <Eye className="w-5 h-5" />
-                )}
+                {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
               </button>
             </div>
           </div>
 
           {/* Confirm Password */}
           <div>
-            <label
-              htmlFor="confirmPassword"
-              className="block text-sm font-medium mb-1 text-foreground"
-            >
-              Confirm Password
-            </label>
+            <label htmlFor="confirmPassword" className="block text-sm font-medium mb-1 text-foreground">Confirm Password</label>
             <div className="relative">
               <input
                 id="confirmPassword"
@@ -178,11 +169,7 @@ export default function RegisterPage() {
                 onClick={() => setShowConfirm(!showConfirm)}
                 className="absolute inset-y-0 right-3 flex items-center text-muted-foreground hover:text-foreground"
               >
-                {showConfirm ? (
-                  <EyeOff className="w-5 h-5" />
-                ) : (
-                  <Eye className="w-5 h-5" />
-                )}
+                {showConfirm ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
               </button>
             </div>
           </div>
@@ -193,14 +180,9 @@ export default function RegisterPage() {
             disabled={loading}
             className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-primary to-accent text-white font-medium py-3 rounded-lg shadow-md hover:opacity-90 transition disabled:opacity-50"
           >
-            {loading ? (
-              "Creating Account..."
-            ) : (
-              <>
-                <UserPlus className="w-5 h-5" />
-                Create Account
-              </>
-            )}
+            {loading ? "Creating Account..." : <>
+              <UserPlus className="w-5 h-5" /> Create Account
+            </>}
           </button>
         </form>
 
@@ -208,9 +190,7 @@ export default function RegisterPage() {
         <div className="mt-6 text-center text-sm text-muted-foreground">
           <p>
             Already have an account?{" "}
-            <Link href="/login" className="text-primary hover:underline">
-              Sign in
-            </Link>
+            <Link href="/login" className="text-primary hover:underline">Sign in</Link>
           </p>
         </div>
       </div>
