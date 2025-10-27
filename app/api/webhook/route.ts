@@ -9,9 +9,8 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
 export async function POST(req: Request) {
   const payload = await req.text();
   const sig = req.headers.get("stripe-signature")!;
-  let event: Stripe.Event;
 
-  console.log("Webhook hit! Headers:", req.headers.get("stripe-signature"));
+  let event: Stripe.Event;
 
   try {
     event = stripe.webhooks.constructEvent(
@@ -36,7 +35,7 @@ export async function POST(req: Request) {
     return new NextResponse("Missing customer email", { status: 400 });
   }
 
-  // 1️⃣ Ensure user exists
+  // 1️⃣ Ensure the user exists in your `users` table
   let { data: user, error: userError } = await supabase
     .from("users")
     .select("*")
@@ -49,8 +48,9 @@ export async function POST(req: Request) {
   }
 
   if (!user) {
-    console.log("User not found. Creating new record...");
+    console.log("User not found in users table. Creating new record...");
 
+    // Fetch auth user by email safely
     const { data: authUsers, error: authError } = await supabase.auth.admin.listUsers();
     if (authError) {
       console.error("Error fetching auth users:", authError.message);
@@ -82,7 +82,7 @@ export async function POST(req: Request) {
     user = newUser;
   }
 
-  // 2️⃣ Retrieve subscription from Stripe
+  // 2️⃣ Retrieve subscription
   const subscription = (await stripe.subscriptions.retrieve(
     session.subscription as string
   )) as Stripe.Subscription;
@@ -92,57 +92,36 @@ export async function POST(req: Request) {
     return new NextResponse("Subscription not found", { status: 404 });
   }
 
-  // 3️⃣ Get subscription item
+  // 3️⃣ Extract subscription item safely
   const subscriptionItem = subscription.items.data[0];
-  if (!subscriptionItem?.price?.id) {
+  if (!subscriptionItem || !subscriptionItem.price?.id) {
     console.error("Subscription has no items or price ID:", subscription.id);
     return new NextResponse("Invalid subscription items", { status: 400 });
   }
 
-  // 4️⃣ Map Stripe price ID to plan_id from DB
-  const { data: planData, error: planError } = await supabase
-    .from("plans")
-    .select("id, name")
-    .eq("price_id", subscriptionItem.price.id)
-    .single();
-
-  if (planError || !planData) {
-    console.error("Plan not found for Stripe price ID:", subscriptionItem.price.id);
-    return new NextResponse("Plan not found", { status: 404 });
-  }
-
-  const planId = planData.id;
-
-  // 5️⃣ Upsert subscription
+  // 4️⃣ Upsert subscription record
   const periodEnd = (subscription as any).current_period_end;
-  const { error: upsertError } = await supabase
-    .from("subscriptions")
-    .upsert(
-      [
-        {
-          user_id: user.id,
-          plan_id: planId,
-          stripe_customer_id: session.customer as string,
-          stripe_subscription_id: subscription.id,
-          status: subscription.status,
-          current_period_end: periodEnd ? new Date(periodEnd * 1000).toISOString() : null,
-        },
-      ],
-      { onConflict: "stripe_subscription_id" } // ✅ must be string
-    );
+  const { error: upsertError } = await supabase.from("subscriptions").upsert({
+    user_id: user.id,
+    stripe_customer_id: session.customer as string,
+    stripe_subscription_id: subscription.id,
+    status: subscription.status,
+    current_period_end: periodEnd ? new Date(periodEnd * 1000).toISOString() : null,
+  });
 
   if (upsertError) {
     console.error("Failed to upsert subscription:", upsertError.message);
     return new NextResponse("Failed to upsert subscription", { status: 500 });
   }
 
-  // 6️⃣ Update user role
-  const roleMap: Record<string, string> = {
-    Standard: "standard",
-    Pro: "pro",
+  // 5️⃣ Update user role based on plan
+  const planRoleMap: Record<string, string> = {
+    price_standard: "standard",
+    price_pro: "pro",
   };
 
-  const role = planData.name ? roleMap[planData.name] ?? "pro" : "pro";
+  const planId = subscriptionItem.price.id;
+  const role = planRoleMap[planId] ?? "pro";
 
   if (subscription.status === "active") {
     const { error: roleError } = await supabase
