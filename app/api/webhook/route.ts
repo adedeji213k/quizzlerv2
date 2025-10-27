@@ -3,22 +3,26 @@ import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
-// Initialize Stripe + Supabase
+// ✅ Initialize Stripe + Supabase
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: "2025-09-30.clover",
 });
+
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-// ✅ Use this for Next.js 16+ instead of `export const config`
+// ✅ Runtime and region for Vercel edge/node
 export const runtime = "nodejs";
-export const preferredRegion = "iad1"; // optional: pick a region close to your Stripe endpoint
+export const preferredRegion = "iad1";
 
 export async function POST(req: Request) {
   const body = await req.text();
-  const sig = headers().get("stripe-signature");
+
+  // ✅ Await headers() because it's now async in Next.js 16
+  const hdrs = await headers();
+  const sig = hdrs.get("stripe-signature");
 
   let event: Stripe.Event;
 
@@ -34,11 +38,13 @@ export async function POST(req: Request) {
   }
 
   try {
-    if (event.type === "customer.subscription.created" ||
-        event.type === "customer.subscription.updated") {
+    // ✅ Handle subscription events
+    if (
+      event.type === "customer.subscription.created" ||
+      event.type === "customer.subscription.updated"
+    ) {
       const subscription = event.data.object as Stripe.Subscription;
 
-      // Extract fields safely
       const customerId = subscription.customer as string;
       const subscriptionId = subscription.id;
       const planId = subscription.items.data[0]?.price?.id;
@@ -47,7 +53,7 @@ export async function POST(req: Request) {
         ? new Date(subscription.current_period_end * 1000).toISOString()
         : null;
 
-      // Get the user_id linked to this customer
+      // Find the linked user
       const { data: userData } = await supabase
         .from("users")
         .select("id")
@@ -66,7 +72,7 @@ export async function POST(req: Request) {
               status,
               current_period_end: periodEnd,
             },
-            { onConflict: "stripe_subscription_id" } // ✅ must be string not array
+            { onConflict: "stripe_subscription_id" }
           );
 
         if (upsertError) {
