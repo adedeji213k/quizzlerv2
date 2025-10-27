@@ -28,40 +28,49 @@ export default function SubscriptionManager() {
     const fetchData = async () => {
       setLoading(true);
       try {
-        // 1️⃣ Fetch plans metadata from Supabase
+        // 1️⃣ Fetch all plans
         const { data: plansData, error: plansError } = await supabase
           .from("plans")
           .select("*");
         if (plansError) throw plansError;
         if (plansData) setPlans(plansData);
 
-        // 2️⃣ Fetch current user subscription
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session) throw new Error("Not logged in");
+        // 2️⃣ Get current session
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        if (!session || sessionError) throw new Error("Not logged in");
 
+        const userId = session.user.id;
+
+        // 3️⃣ Fetch subscription for the current user
         const { data: subData, error: subError } = await supabase
           .from("subscriptions")
           .select(`
             status,
             current_period_end,
-            plan:plans(name)
+            plan:plans(id, name)
           `)
-          .eq("user_id", session.user.id)
-          .single();
+          .eq("user_id", userId)
+          .limit(1);
 
-        if (subError && subError.code !== "PGRST116") throw subError; // ignore "no row found"
+        if (subError && subError.code !== "PGRST116") throw subError; // ignore no row found
 
-        if (subData) {
-          // Safe extraction: Supabase returns plan as array sometimes
-          const plan = Array.isArray(subData.plan) ? subData.plan[0] : subData.plan;
+        if (subData && subData.length > 0) {
+          const sub = subData[0];
+          const plan = Array.isArray(sub.plan) ? sub.plan[0] : sub.plan;
+
           setSubscription({
             plan_name: plan?.name ?? "Unknown Plan",
-            status: subData.status ?? "inactive",
-            current_period_end: subData.current_period_end ?? new Date().toISOString(),
+            status: sub.status ?? "inactive",
+            current_period_end: sub.current_period_end ?? new Date().toISOString(),
           });
+        } else {
+          // No subscription found → Free plan
+          setSubscription(null);
         }
+
       } catch (err: any) {
         console.error("Error fetching subscription data:", err);
+        setSubscription(null);
       } finally {
         setLoading(false);
       }
@@ -73,15 +82,15 @@ export default function SubscriptionManager() {
   const handleUpgrade = async (plan: Plan) => {
     setCheckoutLoading(true);
     try {
-      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-      if (!sessionData.session || sessionError) throw new Error("Not logged in");
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      if (!session || sessionError) throw new Error("Not logged in");
 
       const res = await fetch("/api/create-checkout-session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           planId: plan.id,
-          userId: sessionData.session.user.id,
+          userId: session.user.id,
         }),
       });
 
