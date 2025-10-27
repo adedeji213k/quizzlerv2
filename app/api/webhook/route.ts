@@ -88,7 +88,7 @@ export async function POST(req: Request) {
 
   const subscription = await stripe.subscriptions.retrieve(
     session.subscription as string
-  );
+  ) as Stripe.Subscription;
 
   const subscriptionItem = subscription.items.data[0];
 
