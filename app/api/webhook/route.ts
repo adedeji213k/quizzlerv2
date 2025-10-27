@@ -11,7 +11,7 @@ export async function POST(req: Request) {
   const sig = req.headers.get("stripe-signature")!;
   let event: Stripe.Event;
 
-  // 1️⃣ Verify webhook signature
+  // Verify webhook signature
   try {
     event = stripe.webhooks.constructEvent(
       payload,
@@ -23,7 +23,6 @@ export async function POST(req: Request) {
     return new NextResponse(`Webhook Error: ${err.message}`, { status: 400 });
   }
 
-  // Only handle completed checkout sessions
   if (event.type !== "checkout.session.completed") {
     return NextResponse.json({ received: true });
   }
@@ -36,7 +35,7 @@ export async function POST(req: Request) {
     return new NextResponse("Missing customer email", { status: 400 });
   }
 
-  // 2️⃣ Ensure user exists
+  // Ensure user exists
   let { data: user, error: userError } = await supabase
     .from("users")
     .select("*")
@@ -49,7 +48,6 @@ export async function POST(req: Request) {
   }
 
   if (!user) {
-    // Fetch auth user safely
     const { data: authUsers, error: authError } = await supabase.auth.admin.listUsers();
     if (authError) {
       console.error("Error fetching auth users:", authError.message);
@@ -81,13 +79,16 @@ export async function POST(req: Request) {
     user = newUser;
   }
 
-  // 3️⃣ Retrieve Stripe subscription
+  // Retrieve subscription
   if (!session.subscription) {
     console.error("Session has no subscription:", session.id);
     return new NextResponse("No subscription ID in session", { status: 400 });
   }
 
-  const subscription = await stripe.subscriptions.retrieve(session.subscription as string);
+  const subscription = (await stripe.subscriptions.retrieve(
+    session.subscription as string
+  )) as Stripe.Subscription; // explicitly cast
+
   const subscriptionItem = subscription.items.data[0];
 
   if (!subscriptionItem?.price?.id) {
@@ -95,7 +96,7 @@ export async function POST(req: Request) {
     return new NextResponse("Invalid subscription items", { status: 400 });
   }
 
-  // 4️⃣ Map Stripe price ID → plan_id from DB
+  // Map Stripe price ID → plan_id from DB
   const { data: planData, error: planError } = await supabase
     .from("plans")
     .select("id, name")
@@ -109,19 +110,11 @@ export async function POST(req: Request) {
 
   const planId = planData.id;
 
-  // 5️⃣ Check for existing subscription for the user
-  const { data: existingSub } = await supabase
-    .from("subscriptions")
-    .select("*")
-    .eq("user_id", user.id)
-    .eq("stripe_subscription_id", subscription.id)
-    .single();
-
+  // Upsert subscription
   const periodEnd = subscription.current_period_end
     ? new Date(subscription.current_period_end * 1000).toISOString()
     : null;
 
-  // 6️⃣ Upsert subscription
   const { error: upsertError } = await supabase
     .from("subscriptions")
     .upsert(
@@ -133,7 +126,7 @@ export async function POST(req: Request) {
         status: subscription.status,
         current_period_end: periodEnd,
       },
-      { onConflict: "stripe_subscription_id" } // ensures updates instead of duplicates
+      { onConflict: "stripe_subscription_id" } // ✅ single string for TS
     );
 
   if (upsertError) {
@@ -141,7 +134,7 @@ export async function POST(req: Request) {
     return new NextResponse("Failed to upsert subscription", { status: 500 });
   }
 
-  // 7️⃣ Update user role based on plan
+  // Update user role
   const roleMap: Record<string, string> = {
     Standard: "standard",
     Pro: "pro",
