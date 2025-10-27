@@ -11,7 +11,7 @@ export async function POST(req: Request) {
   const sig = req.headers.get("stripe-signature")!;
   let event: Stripe.Event;
 
-  // Verify webhook signature
+  // 1️⃣ Verify webhook signature
   try {
     event = stripe.webhooks.constructEvent(
       payload,
@@ -23,6 +23,7 @@ export async function POST(req: Request) {
     return new NextResponse(`Webhook Error: ${err.message}`, { status: 400 });
   }
 
+  // Only handle checkout.session.completed
   if (event.type !== "checkout.session.completed") {
     return NextResponse.json({ received: true });
   }
@@ -35,7 +36,7 @@ export async function POST(req: Request) {
     return new NextResponse("Missing customer email", { status: 400 });
   }
 
-  // Ensure user exists
+  // 2️⃣ Ensure user exists
   let { data: user, error: userError } = await supabase
     .from("users")
     .select("*")
@@ -79,7 +80,7 @@ export async function POST(req: Request) {
     user = newUser;
   }
 
-  // Retrieve subscription
+  // 3️⃣ Retrieve subscription from Stripe
   if (!session.subscription) {
     console.error("Session has no subscription:", session.id);
     return new NextResponse("No subscription ID in session", { status: 400 });
@@ -87,7 +88,7 @@ export async function POST(req: Request) {
 
   const subscription = (await stripe.subscriptions.retrieve(
     session.subscription as string
-  )) as Stripe.Subscription; // explicitly cast
+  )) as Stripe.Subscription;
 
   const subscriptionItem = subscription.items.data[0];
 
@@ -96,7 +97,7 @@ export async function POST(req: Request) {
     return new NextResponse("Invalid subscription items", { status: 400 });
   }
 
-  // Map Stripe price ID → plan_id from DB
+  // 4️⃣ Map Stripe price ID → plan_id from DB
   const { data: planData, error: planError } = await supabase
     .from("plans")
     .select("id, name")
@@ -110,23 +111,23 @@ export async function POST(req: Request) {
 
   const planId = planData.id;
 
-  // Upsert subscription
-  const periodEnd = subscription.current_period_end
-    ? new Date(subscription.current_period_end * 1000).toISOString()
+  // 5️⃣ Upsert subscription
+  const periodEnd = (subscription as any).current_period_end
+    ? new Date((subscription as any).current_period_end * 1000).toISOString()
     : null;
 
   const { error: upsertError } = await supabase
     .from("subscriptions")
     .upsert(
-      {
+      [{
         user_id: user.id,
         plan_id: planId,
         stripe_customer_id: session.customer as string,
         stripe_subscription_id: subscription.id,
         status: subscription.status,
         current_period_end: periodEnd,
-      },
-      { onConflict: "stripe_subscription_id" } // ✅ single string for TS
+      }],
+      { onConflict: "stripe_subscription_id" } // ✅ must be string
     );
 
   if (upsertError) {
@@ -134,7 +135,7 @@ export async function POST(req: Request) {
     return new NextResponse("Failed to upsert subscription", { status: 500 });
   }
 
-  // Update user role
+  // 6️⃣ Update user role based on plan
   const roleMap: Record<string, string> = {
     Standard: "standard",
     Pro: "pro",
