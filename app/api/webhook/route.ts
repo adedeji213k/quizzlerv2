@@ -13,14 +13,14 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-// ✅ Runtime and region for Vercel edge/node
+// ✅ Runtime and region for Vercel
 export const runtime = "nodejs";
 export const preferredRegion = "iad1";
 
 export async function POST(req: Request) {
   const body = await req.text();
 
-  // ✅ Await headers() because it's now async in Next.js 16
+  // ✅ Await headers() (Next.js 16)
   const hdrs = await headers();
   const sig = hdrs.get("stripe-signature");
 
@@ -43,17 +43,20 @@ export async function POST(req: Request) {
       event.type === "customer.subscription.created" ||
       event.type === "customer.subscription.updated"
     ) {
-      const subscription = event.data.object as Stripe.Subscription;
+      const subscription = event.data.object as Stripe.Subscription & {
+        current_period_end?: number;
+      };
 
       const customerId = subscription.customer as string;
       const subscriptionId = subscription.id;
-      const planId = subscription.items.data[0]?.price?.id;
+      const planId = subscription.items?.data?.[0]?.price?.id ?? null;
       const status = subscription.status;
-      const periodEnd = subscription.current_period_end
-        ? new Date(subscription.current_period_end * 1000).toISOString()
-        : null;
+      const periodEnd =
+        subscription.current_period_end != null
+          ? new Date(subscription.current_period_end * 1000).toISOString()
+          : null;
 
-      // Find the linked user
+      // ✅ Fetch user linked to customer
       const { data: userData } = await supabase
         .from("users")
         .select("id")
@@ -83,6 +86,7 @@ export async function POST(req: Request) {
       }
     }
 
+    // ✅ Handle subscription deletion
     if (event.type === "customer.subscription.deleted") {
       const subscription = event.data.object as Stripe.Subscription;
       const subscriptionId = subscription.id;
