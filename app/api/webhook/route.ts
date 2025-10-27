@@ -13,14 +13,14 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-// ✅ Runtime and region for Vercel
+// ✅ Runtime + region (for Vercel)
 export const runtime = "nodejs";
 export const preferredRegion = "iad1";
 
 export async function POST(req: Request) {
   const body = await req.text();
 
-  // ✅ Await headers() (Next.js 16)
+  // ✅ Await headers in Next.js 16+
   const hdrs = await headers();
   const sig = hdrs.get("stripe-signature");
 
@@ -43,20 +43,23 @@ export async function POST(req: Request) {
       event.type === "customer.subscription.created" ||
       event.type === "customer.subscription.updated"
     ) {
+      // 👇 Fix: extend the type to include missing fields
       const subscription = event.data.object as Stripe.Subscription & {
         current_period_end?: number;
       };
 
       const customerId = subscription.customer as string;
-      const subscriptionId = subscription.id;
-      const planId = subscription.items?.data?.[0]?.price?.id ?? null;
+      const stripeSubscriptionId = subscription.id;
       const status = subscription.status;
-      const periodEnd =
-        subscription.current_period_end != null
-          ? new Date(subscription.current_period_end * 1000).toISOString()
-          : null;
 
-      // ✅ Fetch user linked to customer
+      // 👇 Safe access to possibly missing field
+      const current_period_end = subscription.current_period_end
+        ? new Date(subscription.current_period_end * 1000).toISOString()
+        : null;
+
+      const priceId = subscription.items?.data?.[0]?.price?.id ?? null;
+
+      // ✅ Find user by Stripe customer ID
       const { data: userData } = await supabase
         .from("users")
         .select("id")
@@ -69,11 +72,11 @@ export async function POST(req: Request) {
           .upsert(
             {
               user_id: userData.id,
-              plan_id: planId,
+              plan_id: priceId,
               stripe_customer_id: customerId,
-              stripe_subscription_id: subscriptionId,
+              stripe_subscription_id: stripeSubscriptionId,
               status,
-              current_period_end: periodEnd,
+              current_period_end,
             },
             { onConflict: "stripe_subscription_id" }
           );
@@ -81,20 +84,18 @@ export async function POST(req: Request) {
         if (upsertError) {
           console.error("❌ Supabase upsert error:", upsertError.message);
         } else {
-          console.log("✅ Subscription saved:", subscriptionId);
+          console.log("✅ Subscription saved:", stripeSubscriptionId);
         }
       }
     }
 
-    // ✅ Handle subscription deletion
+    // ✅ Handle subscription cancellation
     if (event.type === "customer.subscription.deleted") {
       const subscription = event.data.object as Stripe.Subscription;
-      const subscriptionId = subscription.id;
-
       await supabase
         .from("subscriptions")
         .update({ status: "canceled" })
-        .eq("stripe_subscription_id", subscriptionId);
+        .eq("stripe_subscription_id", subscription.id);
     }
 
     return new NextResponse("Webhook handled", { status: 200 });
