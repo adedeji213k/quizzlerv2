@@ -1,33 +1,31 @@
-import { NextResponse } from "next/server";
 import Stripe from "stripe";
-import { supabase } from "@/lib/supabaseClient";
+import { headers } from "next/headers";
+import { NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
 
+// Initialize Stripe + Supabase
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: "2025-09-30.clover",
+  apiVersion: "2024-06-20",
 });
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
 
-// ✅ Required to allow raw body for Stripe signature verification
-export const config = {
-  api: {
-    bodyParser: false,
-  },
-};
+// ✅ Use this for Next.js 16+ instead of `export const config`
+export const runtime = "nodejs";
+export const preferredRegion = "iad1"; // optional: pick a region close to your Stripe endpoint
 
 export async function POST(req: Request) {
+  const body = await req.text();
+  const sig = headers().get("stripe-signature");
+
   let event: Stripe.Event;
 
   try {
-    const payload = await req.text();
-    const sig = req.headers.get("stripe-signature");
-
-    if (!sig) {
-      console.error("❌ Missing Stripe signature header");
-      return new NextResponse("Missing stripe-signature", { status: 400 });
-    }
-
     event = stripe.webhooks.constructEvent(
-      payload,
-      sig,
+      body,
+      sig!,
       process.env.STRIPE_WEBHOOK_SECRET!
     );
   } catch (err: any) {
@@ -35,138 +33,63 @@ export async function POST(req: Request) {
     return new NextResponse(`Webhook Error: ${err.message}`, { status: 400 });
   }
 
-  // Handle only checkout completion
-  if (event.type !== "checkout.session.completed") {
-    return NextResponse.json({ received: true });
-  }
+  try {
+    if (event.type === "customer.subscription.created" ||
+        event.type === "customer.subscription.updated") {
+      const subscription = event.data.object as Stripe.Subscription;
 
-  const session = event.data.object as Stripe.Checkout.Session;
-  const customerEmail = session.customer_email;
+      // Extract fields safely
+      const customerId = subscription.customer as string;
+      const subscriptionId = subscription.id;
+      const planId = subscription.items.data[0]?.price?.id;
+      const status = subscription.status;
+      const periodEnd = subscription.current_period_end
+        ? new Date(subscription.current_period_end * 1000).toISOString()
+        : null;
 
-  if (!customerEmail) {
-    console.error("❌ No customer email in session:", session.id);
-    return new NextResponse("Missing customer email", { status: 400 });
-  }
+      // Get the user_id linked to this customer
+      const { data: userData } = await supabase
+        .from("users")
+        .select("id")
+        .eq("stripe_customer_id", customerId)
+        .single();
 
-  // 🔹 Ensure user exists
-  let { data: user, error: userError } = await supabase
-    .from("users")
-    .select("*")
-    .eq("email", customerEmail)
-    .single();
+      if (userData) {
+        const { error: upsertError } = await supabase
+          .from("subscriptions")
+          .upsert(
+            {
+              user_id: userData.id,
+              plan_id: planId,
+              stripe_customer_id: customerId,
+              stripe_subscription_id: subscriptionId,
+              status,
+              current_period_end: periodEnd,
+            },
+            { onConflict: "stripe_subscription_id" } // ✅ must be string not array
+          );
 
-  if (userError && userError.code !== "PGRST116") {
-    console.error("DB error fetching user:", userError.message);
-    return new NextResponse("Database error", { status: 500 });
-  }
-
-  if (!user) {
-    const { data: authUsers, error: authError } =
-      await supabase.auth.admin.listUsers();
-
-    if (authError) {
-      console.error("Error fetching auth users:", authError.message);
-      return new NextResponse("Auth error", { status: 500 });
+        if (upsertError) {
+          console.error("❌ Supabase upsert error:", upsertError.message);
+        } else {
+          console.log("✅ Subscription saved:", subscriptionId);
+        }
+      }
     }
 
-    const authUser = authUsers.users.find((u) => u.email === customerEmail);
-    if (!authUser) {
-      console.error("User not found in auth.users:", customerEmail);
-      return new NextResponse("Auth user not found", { status: 404 });
+    if (event.type === "customer.subscription.deleted") {
+      const subscription = event.data.object as Stripe.Subscription;
+      const subscriptionId = subscription.id;
+
+      await supabase
+        .from("subscriptions")
+        .update({ status: "canceled" })
+        .eq("stripe_subscription_id", subscriptionId);
     }
 
-    const { data: newUser, error: insertError } = await supabase
-      .from("users")
-      .insert({
-        id: authUser.id,
-        email: customerEmail,
-        name: authUser.user_metadata?.full_name ?? "",
-        role: "free",
-      })
-      .select()
-      .single();
-
-    if (insertError) {
-      console.error("Failed to insert user:", insertError.message);
-      return new NextResponse("Failed to create user", { status: 500 });
-    }
-
-    user = newUser;
+    return new NextResponse("Webhook handled", { status: 200 });
+  } catch (err) {
+    console.error("❌ Webhook handling error:", err);
+    return new NextResponse("Server Error", { status: 500 });
   }
-
-  // 🔹 Retrieve subscription
-  if (!session.subscription) {
-    console.error("No subscription in session:", session.id);
-    return new NextResponse("No subscription ID in session", { status: 400 });
-  }
-
-  const subscription = (await stripe.subscriptions.retrieve(
-    session.subscription as string
-  )) as Stripe.Subscription;
-
-  const subscriptionItem = subscription.items.data[0];
-
-  if (!subscriptionItem?.price?.id) {
-    console.error("❌ Subscription has no price ID:", subscription.id);
-    return new NextResponse("Invalid subscription items", { status: 400 });
-  }
-
-  // 🔹 Map Stripe price ID → plan_id
-  const { data: planData, error: planError } = await supabase
-    .from("plans")
-    .select("id, name")
-    .eq("price_id", subscriptionItem.price.id)
-    .single();
-
-  if (planError || !planData) {
-    console.error("❌ Plan not found for Stripe price ID:", subscriptionItem.price.id);
-    return new NextResponse("Plan not found", { status: 404 });
-  }
-
-  const planId = planData.id;
-  const periodEnd = subscription.current_period_end
-    ? new Date(subscription.current_period_end * 1000).toISOString()
-    : null;
-
-  // 🔹 Upsert subscription record
-  const { error: upsertError } = await supabase.from("subscriptions").upsert(
-    [
-      {
-        user_id: user.id,
-        plan_id: planId,
-        stripe_customer_id: session.customer as string,
-        stripe_subscription_id: subscription.id,
-        status: subscription.status,
-        current_period_end: periodEnd,
-      },
-    ],
-    { onConflict: "stripe_subscription_id" }
-  );
-
-  if (upsertError) {
-    console.error("❌ Failed to upsert subscription:", upsertError);
-    return new NextResponse("Failed to upsert subscription", { status: 500 });
-  }
-
-  // 🔹 Update user role
-  const roleMap: Record<string, string> = {
-    Standard: "standard",
-    Pro: "pro",
-  };
-  const role = planData.name ? roleMap[planData.name] ?? "pro" : "pro";
-
-  if (subscription.status === "active") {
-    const { error: roleError } = await supabase
-      .from("users")
-      .update({ role })
-      .eq("id", user.id);
-
-    if (roleError) {
-      console.error("❌ Failed to update user role:", roleError.message);
-      return new NextResponse("Failed to update role", { status: 500 });
-    }
-  }
-
-  console.log("✅ Subscription processed successfully for:", customerEmail);
-  return NextResponse.json({ received: true });
 }
