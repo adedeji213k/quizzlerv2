@@ -86,9 +86,9 @@ export async function POST(req: Request) {
     return new NextResponse("No subscription ID in session", { status: 400 });
   }
 
-  const subscription = (await stripe.subscriptions.retrieve(
+  const subscription = await stripe.subscriptions.retrieve(
     session.subscription as string
-  )) as Stripe.Subscription;
+  );
 
   const subscriptionItem = subscription.items.data[0];
 
@@ -98,25 +98,44 @@ export async function POST(req: Request) {
   }
 
   // 4️⃣ Map Stripe price ID → plan_id from DB
+  console.log("🔍 Looking for plan with price_id:", subscriptionItem.price.id);
+  
   const { data: planData, error: planError } = await supabase
     .from("plans")
-    .select("id, name")
+    .select("id, name, price_id")
     .eq("price_id", subscriptionItem.price.id)
     .single();
 
   if (planError || !planData) {
-    console.error("Plan not found for Stripe price ID:", subscriptionItem.price.id);
+    console.error("❌ Plan not found for Stripe price ID:", subscriptionItem.price.id);
+    console.error("Plan query error:", planError);
+    
+    // List all available plans for debugging
+    const { data: allPlans } = await supabase.from("plans").select("id, name, price_id");
+    console.log("Available plans in database:", allPlans);
+    
     return new NextResponse("Plan not found", { status: 404 });
   }
 
+  console.log("✅ Plan found:", planData);
   const planId = planData.id;
 
-  // 5️⃣ Upsert subscription
-  const periodEnd = (subscription as any).current_period_end
-    ? new Date((subscription as any).current_period_end * 1000).toISOString()
+  // 5️⃣ Upsert subscription with proper current_period_end
+  const periodEnd = subscription.current_period_end
+    ? new Date(subscription.current_period_end * 1000).toISOString()
     : null;
 
-  const { error: upsertError } = await supabase
+  console.log("📊 Subscription data to upsert:", {
+    user_id: user.id,
+    plan_id: planId,
+    stripe_customer_id: session.customer as string,
+    stripe_subscription_id: subscription.id,
+    status: subscription.status,
+    current_period_end: periodEnd,
+    raw_period_end: subscription.current_period_end,
+  });
+
+  const { data: upsertedData, error: upsertError } = await supabase
     .from("subscriptions")
     .upsert(
       [{
@@ -127,13 +146,16 @@ export async function POST(req: Request) {
         status: subscription.status,
         current_period_end: periodEnd,
       }],
-      { onConflict: "stripe_subscription_id" } // ✅ must be string
-    );
+      { onConflict: "stripe_subscription_id" }
+    )
+    .select();
 
   if (upsertError) {
-    console.error("Failed to upsert subscription:", upsertError.message);
+    console.error("❌ Failed to upsert subscription:", upsertError);
     return new NextResponse("Failed to upsert subscription", { status: 500 });
   }
+
+  console.log("✅ Subscription upserted successfully:", upsertedData);
 
   // 6️⃣ Update user role based on plan
   const roleMap: Record<string, string> = {
