@@ -49,7 +49,8 @@ export async function POST(req: Request) {
   if (!user) {
     console.log("User not found in users table. Creating new record...");
 
-    const { data: authUsers, error: authError } = await supabase.auth.admin.listUsers();
+    const { data: authUsers, error: authError } =
+      await supabase.auth.admin.listUsers();
     if (authError) {
       console.error("Error fetching auth users:", authError.message);
       return new NextResponse("Auth error", { status: 500 });
@@ -110,7 +111,18 @@ export async function POST(req: Request) {
     console.error("⚠️ Could not find plan for price:", priceId, planError.message);
   }
 
-  // 5️⃣ Upsert subscription record with plan_id
+  // 🧹 5️⃣ Cancel/deactivate other active subscriptions for this user
+  const { error: deactivateError } = await supabase
+    .from("subscriptions")
+    .update({ status: "canceled" })
+    .eq("user_id", user.id)
+    .neq("stripe_subscription_id", subscription.id);
+
+  if (deactivateError) {
+    console.error("Failed to deactivate old subscriptions:", deactivateError.message);
+  }
+
+  // 6️⃣ Upsert subscription record with plan_id
   const periodEnd = (subscription as any).current_period_end;
   const { error: upsertError } = await supabase.from("subscriptions").upsert({
     user_id: user.id,
@@ -126,7 +138,7 @@ export async function POST(req: Request) {
     return new NextResponse("Failed to upsert subscription", { status: 500 });
   }
 
-  // 6️⃣ Update user role based on plan or default
+  // 7️⃣ Update user role based on plan or default
   const planRoleMap: Record<string, string> = {
     price_standard: "standard",
     price_pro: "pro",
@@ -146,6 +158,10 @@ export async function POST(req: Request) {
     }
   }
 
-  console.log(`✅ Subscription processed successfully for ${customerEmail} (plan: ${plan?.name ?? "unknown"})`);
+  console.log(
+    `✅ Subscription processed successfully for ${customerEmail} (plan: ${
+      plan?.name ?? "unknown"
+    })`
+  );
   return NextResponse.json({ received: true });
 }
