@@ -1,106 +1,140 @@
+import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
-import { headers } from "next/headers";
-import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { supabaseServer } from "@/lib/supabaseServer"; // ✅ use server-side client
 
-// ✅ Initialize Stripe + Supabase
+// Initialize Stripe with your secret key
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: "2025-09-30.clover",
 });
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+// This must match the webhook signing secret from your Stripe dashboard
+const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET!;
 
-// ✅ Runtime + region (for Vercel)
-export const runtime = "nodejs";
-export const preferredRegion = "iad1";
+// 🧩 Define minimal shape for subscription to satisfy TypeScript
+type StripeSubscriptionPayload = {
+  id: string;
+  customer: string;
+  status: string;
+  current_period_end: number;
+  items: {
+    data: {
+      price: {
+        id: string;
+      };
+    }[];
+  };
+};
 
-export async function POST(req: Request) {
-  const body = await req.text();
-
-  // ✅ Await headers in Next.js 16+
-  const hdrs = await headers();
-  const sig = hdrs.get("stripe-signature");
-
+export async function POST(req: NextRequest) {
+  const sig = req.headers.get("stripe-signature");
   let event: Stripe.Event;
 
   try {
-    event = stripe.webhooks.constructEvent(
-      body,
-      sig!,
-      process.env.STRIPE_WEBHOOK_SECRET!
-    );
+    const body = await req.text();
+    event = stripe.webhooks.constructEvent(body, sig!, endpointSecret);
   } catch (err: any) {
     console.error("❌ Webhook signature verification failed:", err.message);
-    return new NextResponse(`Webhook Error: ${err.message}`, { status: 400 });
+    return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
   }
 
   try {
-    // ✅ Handle subscription events
-    if (
-      event.type === "customer.subscription.created" ||
-      event.type === "customer.subscription.updated"
-    ) {
-      // 👇 Fix: extend the type to include missing fields
-      const subscription = event.data.object as Stripe.Subscription & {
-        current_period_end?: number;
-      };
+    switch (event.type) {
+      // 🧾 Subscription created or updated
+      case "customer.subscription.created":
+      case "customer.subscription.updated": {
+        const subscription = event.data.object as unknown as StripeSubscriptionPayload;
 
-      const customerId = subscription.customer as string;
-      const stripeSubscriptionId = subscription.id;
-      const status = subscription.status;
+        const stripeCustomerId = subscription.customer;
+        const stripeSubscriptionId = subscription.id;
+        const status = subscription.status;
+        const current_period_end = new Date(subscription.current_period_end * 1000);
 
-      // 👇 Safe access to possibly missing field
-      const current_period_end = subscription.current_period_end
-        ? new Date(subscription.current_period_end * 1000).toISOString()
-        : null;
+        // Fetch plan ID based on Stripe price ID
+        const priceId = subscription.items.data[0].price.id;
+        const { data: plan, error: planError } = await supabaseServer
+          .from("plans")
+          .select("id, name")
+          .eq("stripe_price_id", priceId)
+          .single();
 
-      const priceId = subscription.items?.data?.[0]?.price?.id ?? null;
+        if (planError) console.error("⚠️ Plan lookup failed:", planError.message);
 
-      // ✅ Find user by Stripe customer ID
-      const { data: userData } = await supabase
-        .from("users")
-        .select("id")
-        .eq("stripe_customer_id", customerId)
-        .single();
-
-      if (userData) {
-        const { error: upsertError } = await supabase
+        // Get the user linked to this Stripe customer
+        const { data: user, error: userError } = await supabaseServer
           .from("subscriptions")
-          .upsert(
-            {
-              user_id: userData.id,
-              plan_id: priceId,
-              stripe_customer_id: customerId,
-              stripe_subscription_id: stripeSubscriptionId,
-              status,
-              current_period_end,
-            },
-            { onConflict: "stripe_subscription_id" }
-          );
+          .select("user_id")
+          .eq("stripe_customer_id", stripeCustomerId)
+          .single();
 
-        if (upsertError) {
-          console.error("❌ Supabase upsert error:", upsertError.message);
-        } else {
-          console.log("✅ Subscription saved:", stripeSubscriptionId);
+        if (userError || !user) {
+          console.error("⚠️ No user found for customer:", stripeCustomerId);
+          break;
         }
+
+        // Update subscription record
+        const { error: subError } = await supabaseServer
+          .from("subscriptions")
+          .upsert({
+            user_id: user.user_id,
+            stripe_customer_id: stripeCustomerId,
+            stripe_subscription_id: stripeSubscriptionId,
+            status,
+            plan_id: plan?.id,
+            current_period_end,
+          });
+
+        if (subError) console.error("⚠️ Subscription upsert failed:", subError.message);
+
+        // Update user role based on plan
+        const newRole = plan?.name?.toLowerCase() || "free";
+        const { error: roleError } = await supabaseServer
+          .from("users")
+          .update({ role: newRole })
+          .eq("id", user.user_id);
+
+        if (roleError) console.error("⚠️ Role update failed:", roleError.message);
+
+        console.log(`✅ Subscription ${status} for user ${user.user_id}`);
+        break;
       }
+
+      // ❌ Subscription canceled
+      case "customer.subscription.deleted": {
+        const subscription = event.data.object as { customer: string };
+        const stripeCustomerId = subscription.customer;
+
+        const { data: user, error: userError } = await supabaseServer
+          .from("subscriptions")
+          .select("user_id")
+          .eq("stripe_customer_id", stripeCustomerId)
+          .single();
+
+        if (userError || !user) {
+          console.error("⚠️ No user found for canceled subscription:", stripeCustomerId);
+          break;
+        }
+
+        await supabaseServer
+          .from("subscriptions")
+          .update({ status: "canceled" })
+          .eq("user_id", user.user_id);
+
+        await supabaseServer
+          .from("users")
+          .update({ role: "free" })
+          .eq("id", user.user_id);
+
+        console.log(`🚫 Subscription canceled for user ${user.user_id}`);
+        break;
+      }
+
+      default:
+        console.log(`ℹ️ Unhandled event type: ${event.type}`);
     }
 
-    // ✅ Handle subscription cancellation
-    if (event.type === "customer.subscription.deleted") {
-      const subscription = event.data.object as Stripe.Subscription;
-      await supabase
-        .from("subscriptions")
-        .update({ status: "canceled" })
-        .eq("stripe_subscription_id", subscription.id);
-    }
-
-    return new NextResponse("Webhook handled", { status: 200 });
-  } catch (err) {
-    console.error("❌ Webhook handling error:", err);
-    return new NextResponse("Server Error", { status: 500 });
+    return NextResponse.json({ received: true }, { status: 200 });
+  } catch (error: any) {
+    console.error("❌ Error processing webhook:", error);
+    return NextResponse.json({ error: "Webhook handler failed" }, { status: 500 });
   }
 }
