@@ -1,16 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
-import { supabaseServer } from "@/lib/supabaseServer"; // ✅ use server-side client
+import { createClient } from "@supabase/supabase-js";
 
-// Initialize Stripe with your secret key
+// ✅ Create Supabase client directly here
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!, // must be service key
+  { auth: { persistSession: false } }
+);
+
+// ✅ Initialize Stripe
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: "2025-09-30.clover",
 });
 
-// This must match the webhook signing secret from your Stripe dashboard
+// ✅ Webhook secret
 const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET!;
 
-// 🧩 Define minimal shape for subscription to satisfy TypeScript
+// Define minimal shape for subscription
 type StripeSubscriptionPayload = {
   id: string;
   customer: string;
@@ -51,7 +58,7 @@ export async function POST(req: NextRequest) {
 
         // Fetch plan ID based on Stripe price ID
         const priceId = subscription.items.data[0].price.id;
-        const { data: plan, error: planError } = await supabaseServer
+        const { data: plan, error: planError } = await supabase
           .from("plans")
           .select("id, name")
           .eq("stripe_price_id", priceId)
@@ -60,7 +67,7 @@ export async function POST(req: NextRequest) {
         if (planError) console.error("⚠️ Plan lookup failed:", planError.message);
 
         // Get the user linked to this Stripe customer
-        const { data: user, error: userError } = await supabaseServer
+        const { data: user, error: userError } = await supabase
           .from("subscriptions")
           .select("user_id")
           .eq("stripe_customer_id", stripeCustomerId)
@@ -72,7 +79,7 @@ export async function POST(req: NextRequest) {
         }
 
         // Update subscription record
-        const { error: subError } = await supabaseServer
+        const { error: subError } = await supabase
           .from("subscriptions")
           .upsert({
             user_id: user.user_id,
@@ -87,7 +94,7 @@ export async function POST(req: NextRequest) {
 
         // Update user role based on plan
         const newRole = plan?.name?.toLowerCase() || "free";
-        const { error: roleError } = await supabaseServer
+        const { error: roleError } = await supabase
           .from("users")
           .update({ role: newRole })
           .eq("id", user.user_id);
@@ -103,7 +110,7 @@ export async function POST(req: NextRequest) {
         const subscription = event.data.object as { customer: string };
         const stripeCustomerId = subscription.customer;
 
-        const { data: user, error: userError } = await supabaseServer
+        const { data: user, error: userError } = await supabase
           .from("subscriptions")
           .select("user_id")
           .eq("stripe_customer_id", stripeCustomerId)
@@ -114,12 +121,12 @@ export async function POST(req: NextRequest) {
           break;
         }
 
-        await supabaseServer
+        await supabase
           .from("subscriptions")
           .update({ status: "canceled" })
           .eq("user_id", user.user_id);
 
-        await supabaseServer
+        await supabase
           .from("users")
           .update({ role: "free" })
           .eq("id", user.user_id);
