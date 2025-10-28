@@ -41,16 +41,17 @@ export default function SubscriptionManager() {
 
         const userId = session.user.id;
 
-        // 3️⃣ Fetch the most recent subscription for the current user
+        // 3️⃣ Fetch the most recent subscription for the current user (by created_at)
         const { data: subData, error: subError } = await supabase
           .from("subscriptions")
           .select(`
             status,
             current_period_end,
+            created_at,
             plan:plans(id, name)
           `)
           .eq("user_id", userId)
-          .order("current_period_end", { ascending: false }) // ✅ get latest subscription
+          .order("created_at", { ascending: false }) // ✅ get latest by creation date
           .limit(1);
 
         if (subError && subError.code !== "PGRST116") throw subError;
