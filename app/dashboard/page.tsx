@@ -1,6 +1,7 @@
 "use client";
+export const dynamic = "force-dynamic";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, Suspense } from "react";
 import {
   LogOut,
   ClipboardList,
@@ -23,7 +24,8 @@ interface SubscriptionInfo {
   expires: string;
 }
 
-export default function DashboardPage() {
+/* ✅ Wrapped in Suspense boundary for Next.js 16 safety */
+function DashboardInner() {
   const [active, setActive] = useState("takeQuiz");
   const [loading, setLoading] = useState(true);
   const [subscription, setSubscription] = useState<SubscriptionInfo | null>(null);
@@ -204,5 +206,14 @@ export default function DashboardPage() {
         </div>
       </main>
     </div>
+  );
+}
+
+/* ✅ Export wrapped in Suspense */
+export default function DashboardPage() {
+  return (
+    <Suspense fallback={<div className="text-center py-20">Loading dashboard...</div>}>
+      <DashboardInner />
+    </Suspense>
   );
 }
