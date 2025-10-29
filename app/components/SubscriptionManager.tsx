@@ -1,4 +1,4 @@
-'use client';
+"use client";
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
@@ -28,30 +28,35 @@ export default function SubscriptionManager() {
     const fetchData = async () => {
       setLoading(true);
       try {
-        // 1️⃣ Fetch all plans
+        // Fetch all plans
         const { data: plansData, error: plansError } = await supabase
           .from("plans")
           .select("*");
         if (plansError) throw plansError;
-        if (plansData) setPlans(plansData);
+        setPlans(plansData || []);
 
-        // 2️⃣ Get current session
-        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        // Get session
+        const {
+          data: { session },
+          error: sessionError,
+        } = await supabase.auth.getSession();
         if (!session || sessionError) throw new Error("Not logged in");
 
         const userId = session.user.id;
 
-        // 3️⃣ Fetch the most recent subscription for the current user (by created_at)
+        // Fetch latest subscription
         const { data: subData, error: subError } = await supabase
           .from("subscriptions")
-          .select(`
+          .select(
+            `
             status,
             current_period_end,
             created_at,
             plan:plans(id, name)
-          `)
+          `
+          )
           .eq("user_id", userId)
-          .order("created_at", { ascending: false }) // ✅ get latest by creation date
+          .order("created_at", { ascending: false })
           .limit(1);
 
         if (subError && subError.code !== "PGRST116") throw subError;
@@ -63,13 +68,12 @@ export default function SubscriptionManager() {
           setSubscription({
             plan_name: plan?.name ?? "Unknown Plan",
             status: sub.status ?? "inactive",
-            current_period_end: sub.current_period_end ?? new Date().toISOString(),
+            current_period_end:
+              sub.current_period_end ?? new Date().toISOString(),
           });
         } else {
-          // No subscription found → Free plan
           setSubscription(null);
         }
-
       } catch (err: any) {
         console.error("Error fetching subscription data:", err);
         setSubscription(null);
@@ -84,7 +88,10 @@ export default function SubscriptionManager() {
   const handleUpgrade = async (plan: Plan) => {
     setCheckoutLoading(true);
     try {
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      const {
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.getSession();
       if (!session || sessionError) throw new Error("Not logged in");
 
       const res = await fetch("/api/create-checkout-session", {
@@ -110,50 +117,75 @@ export default function SubscriptionManager() {
 
   if (loading) {
     return (
-      <div className="flex justify-center items-center p-10">
-        <Loader2 className="w-6 h-6 animate-spin text-primary" />
+      <div className="flex justify-center items-center h-64 text-muted-foreground">
+        <Loader2 className="w-6 h-6 animate-spin mr-2" /> Loading subscription
+        data...
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      {/* Current Subscription */}
-      <div className="p-6 border rounded-xl bg-card shadow-sm">
-        <h2 className="text-xl font-semibold mb-2">Current Plan</h2>
+    <div className="max-w-5xl mx-auto space-y-8">
+      {/* Header */}
+      <h2 className="text-3xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
+        Subscription & Billing
+      </h2>
+
+      {/* Current Plan Card */}
+      <div className="bg-card border border-border rounded-xl shadow-md p-6">
+        <h3 className="text-xl font-semibold mb-3 text-foreground">
+          Current Plan
+        </h3>
         {subscription ? (
-          <div className="space-y-1">
-            <p><strong>Plan:</strong> {subscription.plan_name}</p>
-            <p><strong>Status:</strong> {subscription.status}</p>
+          <div className="space-y-2 text-sm text-muted-foreground">
             <p>
-              <strong>Expires:</strong>{" "}
-              {new Date(subscription.current_period_end).toLocaleDateString()}
+              <strong className="text-foreground">Plan:</strong>{" "}
+              {subscription.plan_name}
+            </p>
+            <p>
+              <strong className="text-foreground">Status:</strong>{" "}
+              {subscription.status}
+            </p>
+            <p>
+              <strong className="text-foreground">Renews:</strong>{" "}
+              {new Date(
+                subscription.current_period_end
+              ).toLocaleDateString()}
             </p>
           </div>
         ) : (
-          <p>You are currently on the Free plan.</p>
+          <p className="text-muted-foreground">
+            You are currently on the{" "}
+            <span className="text-foreground font-medium">Free</span> plan.
+          </p>
         )}
       </div>
 
-      {/* Upgrade Options */}
-      <div className="p-6 border rounded-xl bg-card shadow-sm">
-        <h2 className="text-xl font-semibold mb-4">Upgrade Plan</h2>
-        <div className="grid md:grid-cols-3 gap-4">
+      {/* Available Plans */}
+      <div className="bg-card border border-border rounded-xl shadow-md p-6">
+        <h3 className="text-xl font-semibold mb-4 text-foreground">
+          Upgrade Your Plan
+        </h3>
+
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
           {plans.map((plan) => (
             <div
               key={plan.id}
-              className="border rounded-lg p-4 flex flex-col justify-between bg-background"
+              className="bg-background border border-border rounded-xl shadow-sm p-6 flex flex-col justify-between hover:shadow-lg hover:-translate-y-1 transition-all duration-200"
             >
               <div>
-                <h3 className="text-lg font-bold mb-2">{plan.name}</h3>
-                <p className="mb-2">
-                  <strong>Price:</strong> ${(plan.monthly_price / 100).toFixed(2)} / month
+                <h4 className="text-lg font-semibold mb-2 text-foreground">
+                  {plan.name}
+                </h4>
+                <p className="text-muted-foreground mb-2">
+                  <strong className="text-foreground">Price:</strong>{" "}
+                  ${(plan.monthly_price / 100).toFixed(2)} / month
                 </p>
-                <p className="mb-2">
-                  <strong>AI Limit:</strong>{" "}
+                <p className="text-muted-foreground mb-3">
+                  <strong className="text-foreground">AI Limit:</strong>{" "}
                   {plan.ai_limit > 100_000 ? "Unlimited" : plan.ai_limit}
                 </p>
-                <ul className="list-disc list-inside text-sm space-y-1">
+                <ul className="list-disc list-inside text-sm text-muted-foreground space-y-1">
                   {plan.features.map((f, i) => (
                     <li key={i}>{f}</li>
                   ))}
@@ -163,7 +195,7 @@ export default function SubscriptionManager() {
               <button
                 onClick={() => handleUpgrade(plan)}
                 disabled={checkoutLoading}
-                className="mt-4 w-full py-2 bg-primary text-white rounded-lg hover:bg-primary/90 transition disabled:opacity-50"
+                className="mt-5 w-full py-2 bg-gradient-to-r from-primary to-accent text-white font-medium rounded-lg hover:opacity-90 transition disabled:opacity-50"
               >
                 {checkoutLoading ? "Processing..." : "Upgrade"}
               </button>

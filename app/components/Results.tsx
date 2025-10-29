@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { Trophy, Loader2 } from "lucide-react";
+import { useRouter } from "next/navigation";
 
 interface Quiz {
   title: string;
@@ -14,12 +15,13 @@ interface QuizResult {
   score: number;
   total_questions: number;
   created_at: string;
-  quizzes: Quiz[]; // quizzes is an array
+  quizzes?: Quiz[];
 }
 
 export default function Results() {
   const [results, setResults] = useState<QuizResult[]>([]);
   const [loading, setLoading] = useState(true);
+  const router = useRouter();
 
   useEffect(() => {
     const fetchResults = async () => {
@@ -34,24 +36,19 @@ export default function Results() {
 
       const { data, error } = await supabase
         .from("quiz_results")
-        .select("id, quiz_id, score, total_questions, created_at, quizzes(title)")
+        .select(`
+          id,
+          quiz_id,
+          score,
+          total_questions,
+          created_at,
+          quizzes!quiz_results_quiz_id_fkey(title)
+        `)
         .eq("user_id", session.user.id)
         .order("created_at", { ascending: false });
 
-      if (error) {
-        console.error("Error fetching results:", error.message);
-      } else if (data) {
-        // Normalize quizzes to ensure it's always an array with proper type
-        const normalized = data.map((item: any) => ({
-          ...item,
-          quizzes: Array.isArray(item.quizzes)
-            ? item.quizzes.map((q: any) => ({ title: String(q.title) }))
-            : [],
-        }));
-
-        setResults(normalized);
-      } else {
-        setResults([]);
+      if (!error && data) {
+        setResults(data);
       }
 
       setLoading(false);
@@ -62,8 +59,8 @@ export default function Results() {
 
   if (loading) {
     return (
-      <div className="flex justify-center items-center h-60 text-muted-foreground">
-        <Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading results...
+      <div className="flex justify-center items-center h-64 text-muted-foreground">
+        <Loader2 className="w-6 h-6 animate-spin mr-2" /> Loading results...
       </div>
     );
   }
@@ -97,52 +94,44 @@ export default function Results() {
               ? "text-yellow-500 border-yellow-500/30 bg-yellow-500/5"
               : "text-red-500 border-red-500/30 bg-red-500/5";
 
+          const quizTitle =
+            result.quizzes?.[0]?.title || result.quizzes?.title || "Untitled Quiz";
+
           return (
-            <div
+            <button
               key={result.id}
-              className={`border rounded-xl p-5 shadow-sm hover:shadow-lg transition-all duration-300 hover:-translate-y-1 ${colorClass}`}
+              // ✅ Go to `/results/[result_id]`
+              onClick={() => router.push(`/results/${result.id}`)}
+              className={`w-full text-left border rounded-xl p-5 shadow-sm hover:shadow-lg transition-all duration-300 hover:-translate-y-1 cursor-pointer ${colorClass}`}
             >
-              <h3 className="font-semibold text-lg mb-2 truncate">
-                {result.quizzes[0]?.title || "Untitled Quiz"}
-              </h3>
+              <h3 className="font-semibold text-lg mb-2 truncate">{quizTitle}</h3>
 
-              <div className="flex justify-between text-sm mb-1">
-                <span>Score:</span>
-                <span className="font-semibold">{result.score}</span>
+              <div className="mt-2 text-sm">
+                <p>
+                  Score:{" "}
+                  <strong className="font-bold">
+                    {result.score}/{result.total_questions}
+                  </strong>
+                </p>
+
+                <div className="w-full h-2 mt-2 bg-muted rounded-full overflow-hidden">
+                  <div
+                    className={`h-2 rounded-full ${
+                      percentage >= 80
+                        ? "bg-green-500"
+                        : percentage >= 50
+                        ? "bg-yellow-500"
+                        : "bg-red-500"
+                    }`}
+                    style={{ width: `${percentage}%` }}
+                  ></div>
+                </div>
+
+                <p className="text-xs text-muted-foreground mt-3">
+                  {new Date(result.created_at).toLocaleDateString()}
+                </p>
               </div>
-
-              <div className="flex justify-between text-sm mb-1">
-                <span>Total Questions:</span>
-                <span>{result.total_questions}</span>
-              </div>
-
-              <div className="flex justify-between text-sm mb-3">
-                <span>Percentage:</span>
-                <span className="font-semibold">{percentage}%</span>
-              </div>
-
-              <div className="w-full h-2 bg-muted rounded-full overflow-hidden">
-                <div
-                  className={`h-2 rounded-full ${
-                    percentage >= 80
-                      ? "bg-green-500"
-                      : percentage >= 50
-                      ? "bg-yellow-500"
-                      : "bg-red-500"
-                  }`}
-                  style={{ width: `${percentage}%` }}
-                ></div>
-              </div>
-
-              <p className="text-xs text-muted-foreground mt-3">
-                Taken on{" "}
-                {new Date(result.created_at).toLocaleDateString(undefined, {
-                  month: "short",
-                  day: "numeric",
-                  year: "numeric",
-                })}
-              </p>
-            </div>
+            </button>
           );
         })}
       </div>

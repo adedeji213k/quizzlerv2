@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
-import { Loader2, Upload, FileText, PlusCircle, Eye } from "lucide-react";
+import { Loader2, Upload, FileText, PlusCircle, Eye, X, ArrowLeft } from "lucide-react";
 
 export default function CreateQuizPage() {
   const [title, setTitle] = useState("");
@@ -14,6 +14,8 @@ export default function CreateQuizPage() {
   const [loading, setLoading] = useState(false);
   const [aiGenerating, setAiGenerating] = useState(false);
   const [quizId, setQuizId] = useState<number | null>(null);
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [upgradePlan, setUpgradePlan] = useState<string | null>(null);
 
   const router = useRouter();
 
@@ -29,6 +31,7 @@ export default function CreateQuizPage() {
     if (!file) return alert("Please select a document file to upload.");
 
     setLoading(true);
+    setShowUpgradeModal(false);
 
     const {
       data: { session },
@@ -41,6 +44,49 @@ export default function CreateQuizPage() {
     }
 
     const user = session.user;
+
+    // ✅ Step 0: Check usage limits before doing anything
+    try {
+      const usageTypes = ["ai_calls", "documents_uploaded", "quizzes_created"];
+
+      for (const type of usageTypes) {
+        const res = await fetch("/api/usage", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId: user.id, type }),
+        });
+
+        const data = await res.json();
+
+        console.log("🧾 Usage check →", {
+          type,
+          plan: data.plan,
+          used: data.used ?? "unknown",
+          limit: data.limit ?? "unknown",
+          remaining: data.remaining ?? "unknown",
+          status: res.status,
+        });
+
+        if (res.status === 403) {
+          console.warn(
+            `🚫 BLOCKED: User (${user.id}) on ${data.plan} plan exceeded limit for ${type}.`
+          );
+          setUpgradePlan(data.plan);
+          setShowUpgradeModal(true);
+          setLoading(false);
+          return; // 🚫 Stop if any limit exceeded
+        } else {
+          console.log(
+            `✅ ALLOWED: ${type} usage OK for ${data.plan} plan. Used: ${data.used}/${data.limit}`
+          );
+        }
+      }
+    } catch (err) {
+      console.error("❌ Usage check failed:", err);
+      alert("Could not verify usage limits. Please try again.");
+      setLoading(false);
+      return;
+    }
 
     try {
       // ✅ Step 1: Create quiz record
@@ -94,7 +140,7 @@ export default function CreateQuizPage() {
       });
       if (jobError) throw jobError;
 
-      // ✅ Step 5: Trigger the local API for AI question generation
+      // ✅ Step 5: Trigger AI question generation
       setAiGenerating(true);
 
       const res = await fetch("/api/generate-questions", {
@@ -110,10 +156,19 @@ export default function CreateQuizPage() {
 
       const data = await res.json();
 
+      // 🚫 If AI usage limit reached → show upgrade modal
+      if (res.status === 403 && data.upgrade) {
+        setUpgradePlan(data.plan);
+        setShowUpgradeModal(true);
+        return;
+      }
+
       if (!res.ok) throw new Error(data.error || "Failed to generate questions");
 
       alert(
-        `✅ Quiz created successfully! AI generated ${data.count || numQuestions} questions.`
+        `✅ Quiz created successfully! AI generated ${
+          data.count || numQuestions
+        } questions.`
       );
     } catch (err: any) {
       console.error("❌ Error creating quiz:", err);
@@ -127,6 +182,14 @@ export default function CreateQuizPage() {
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-background via-muted to-background px-6">
       <div className="w-full max-w-2xl bg-card rounded-2xl shadow-[var(--shadow-elegant)] p-8 border border-border">
+        {/* ✅ Back to Dashboard Button */}
+<button
+  onClick={() => router.push("/dashboard")}
+  className="flex items-center gap-2 text-sm px-3 py-2 mb-4 rounded-lg bg-muted hover:bg-accent/10 transition"
+>
+  <ArrowLeft className="w-4 h-4" /> Back to Dashboard
+</button>
+
         <h1 className="text-3xl font-bold text-center mb-2 bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
           Create a New Quiz
         </h1>
@@ -189,7 +252,7 @@ export default function CreateQuizPage() {
             />
           </div>
 
-          {/* Document Upload */}
+          {/* File Upload */}
           <div>
             <label className="block text-sm font-medium mb-2">
               Upload Document
@@ -227,7 +290,7 @@ export default function CreateQuizPage() {
           >
             {loading ? (
               <>
-                <Loader2 className="w-5 h-5 animate-spin" /> Creating Quiz...
+                <Loader2 className="w-5 h-5 animate-spin" /> Checking Usage...
               </>
             ) : aiGenerating ? (
               <>
@@ -242,7 +305,7 @@ export default function CreateQuizPage() {
           </button>
         </form>
 
-        {/* ✅ Show "View Questions" button after creation */}
+        {/* ✅ Show "View Questions" button */}
         {quizId && !loading && !aiGenerating && (
           <div className="mt-6 text-center">
             <button
@@ -254,6 +317,47 @@ export default function CreateQuizPage() {
           </div>
         )}
       </div>
+
+      {/* ⚠️ Upgrade Modal */}
+      {showUpgradeModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="bg-card rounded-2xl p-8 w-full max-w-md shadow-lg border border-border relative">
+            <button
+              onClick={() => setShowUpgradeModal(false)}
+              className="absolute top-3 right-3 text-muted-foreground hover:text-foreground"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <h2 className="text-2xl font-bold mb-3 text-center">
+              Upgrade Your Plan
+            </h2>
+            <p className="text-muted-foreground text-center mb-5">
+              You’ve reached your limit on the{" "}
+              <span className="font-semibold">{upgradePlan}</span> plan.
+              <br /> Upgrade to unlock more AI quiz generation and uploads.
+            </p>
+
+            <div className="flex justify-center gap-4">
+              <button
+  onClick={() => {
+    setShowUpgradeModal(false);
+    router.push("/dashboard?tab=subscription");
+  }}
+  className="bg-gradient-to-r from-primary to-accent text-white px-5 py-2 rounded-lg hover:opacity-90 transition"
+>
+  Upgrade Plan
+</button>
+              <button
+                onClick={() => setShowUpgradeModal(false)}
+                className="px-5 py-2 rounded-lg border border-border hover:bg-muted transition"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

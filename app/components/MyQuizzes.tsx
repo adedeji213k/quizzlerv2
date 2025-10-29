@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
-import { PlusCircle, Edit, Trash2, Loader2, Clock } from "lucide-react";
+import { PlusCircle, Edit, Trash2, Loader2, Clock, CheckCircle2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 interface Quiz {
@@ -16,6 +16,9 @@ interface Quiz {
 export default function MyQuizzes() {
   const [quizzes, setQuizzes] = useState<Quiz[]>([]);
   const [loading, setLoading] = useState(true);
+  const [deletingQuizId, setDeletingQuizId] = useState<number | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingQuiz, setEditingQuiz] = useState<Quiz | null>(null);
   const [newTitle, setNewTitle] = useState("");
@@ -23,17 +26,14 @@ export default function MyQuizzes() {
   const [newDuration, setNewDuration] = useState<number>(10);
   const router = useRouter();
 
-  // ✅ Fetch user's quizzes
+  // Load quizzes
   const fetchQuizzes = async () => {
     setLoading(true);
 
-    const {
-      data: { session },
-      error: sessionError,
-    } = await supabase.auth.getSession();
+    const { data: sessionData } = await supabase.auth.getSession();
+    const session = sessionData?.session;
 
-    if (sessionError || !session) {
-      console.error("Error fetching session:", sessionError);
+    if (!session?.user) {
       setLoading(false);
       return;
     }
@@ -44,12 +44,7 @@ export default function MyQuizzes() {
       .eq("owner", session.user.id)
       .order("created_at", { ascending: false });
 
-    if (error) {
-      console.error("Error fetching quizzes:", error.message);
-    } else {
-      setQuizzes(data || []);
-    }
-
+    if (!error) setQuizzes(data ?? []);
     setLoading(false);
   };
 
@@ -57,43 +52,68 @@ export default function MyQuizzes() {
     fetchQuizzes();
   }, []);
 
-  // ✅ Handle Create Quiz
-  const handleCreateQuiz = () => {
-    router.push("/create-quiz");
-  };
+  const handleCreateQuiz = () => router.push("/create-quiz");
 
-  // ✅ Handle Delete Quiz
+  // ✅ Delete Quiz with rollback safety
   const handleDeleteQuiz = async (quizId: number, e: React.MouseEvent) => {
     e.stopPropagation();
-    const confirmDelete = confirm(
-      "Are you sure you want to delete this quiz? This will remove all related questions, choices, and attempts."
-    );
+    const confirmDelete = confirm("Delete this quiz and its file?");
     if (!confirmDelete) return;
 
-    const { error } = await supabase.from("quizzes").delete().eq("id", quizId);
+    setDeletingQuizId(quizId);
 
-    if (error) {
-      alert("Error deleting quiz: " + error.message);
-    } else {
+    try {
+      // ✅ 1️⃣ Load document for quiz
+      const { data: docs } = await supabase
+        .from("documents")
+        .select("id, storage_path")
+        .eq("quiz_id", quizId)
+        .maybeSingle();
+
+      // ✅ 2️⃣ If document exists → delete file first
+      if (docs?.storage_path) {
+        const { error: storageError } = await supabase.storage
+          .from("documents") // ✅ BUCKET NAME
+          .remove([docs.storage_path]);
+
+        if (storageError) throw new Error("Failed to delete storage file");
+
+        // ✅ Remove DB row for the document
+        await supabase.from("documents").delete().eq("id", docs.id);
+      }
+
+      // ✅ 3️⃣ Delete quiz afterwards (cascade ✅)
+      const { error: quizError } = await supabase
+        .from("quizzes")
+        .delete()
+        .eq("id", quizId);
+
+      if (quizError) throw quizError;
+
       setQuizzes((prev) => prev.filter((q) => q.id !== quizId));
+      setSuccessMessage("Quiz deleted successfully ✅");
+      setTimeout(() => setSuccessMessage(null), 2500);
+      
+    } catch (err: any) {
+      alert("Delete failed: " + err.message);
+    } finally {
+      setDeletingQuizId(null);
     }
   };
 
-  // ✅ Handle Edit Quiz
   const handleEditQuiz = (quiz: Quiz, e: React.MouseEvent) => {
-    e.stopPropagation(); // prevent navigating when clicking edit
+    e.stopPropagation();
     setEditingQuiz(quiz);
     setNewTitle(quiz.title);
     setNewDescription(quiz.description || "");
-    setNewDuration(quiz.duration || 10);
+    setNewDuration(quiz.duration ?? 10);
     setShowEditModal(true);
   };
 
-  // ✅ Save changes
   const handleSaveEdit = async () => {
     if (!editingQuiz) return;
 
-    const { error } = await supabase
+    await supabase
       .from("quizzes")
       .update({
         title: newTitle,
@@ -103,16 +123,11 @@ export default function MyQuizzes() {
       })
       .eq("id", editingQuiz.id);
 
-    if (error) {
-      alert("Error updating quiz: " + error.message);
-    } else {
-      setShowEditModal(false);
-      setEditingQuiz(null);
-      fetchQuizzes();
-    }
+    setShowEditModal(false);
+    setEditingQuiz(null);
+    fetchQuizzes();
   };
 
-  // ✅ Loading State
   if (loading) {
     return (
       <div className="flex justify-center items-center h-64 text-muted-foreground">
@@ -123,6 +138,13 @@ export default function MyQuizzes() {
 
   return (
     <div>
+      {/* ✅ Success Toast */}
+      {successMessage && (
+        <div className="fixed top-4 right-4 bg-green-600 text-white px-4 py-2 rounded-xl shadow-lg flex items-center gap-2">
+          <CheckCircle2 className="w-5 h-5" /> {successMessage}
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-3xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
@@ -138,41 +160,48 @@ export default function MyQuizzes() {
 
       {/* Quiz Cards */}
       {quizzes.length === 0 ? (
-        <div className="text-center py-12 text-muted-foreground">
-          <p>You haven’t created any quizzes yet.</p>
-        </div>
+        <p className="text-center py-12 text-muted-foreground">
+          You haven’t created any quizzes yet.
+        </p>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
           {quizzes.map((quiz) => (
             <div
               key={quiz.id}
-              onClick={() => router.push(`/quiz/${quiz.id}`)} // ✅ navigate on click
+              onClick={() => router.push(`/quiz/${quiz.id}`)}
               className="cursor-pointer bg-card border border-border rounded-xl shadow-md p-6 flex flex-col justify-between hover:shadow-lg hover:-translate-y-1 transition-all duration-200 group"
             >
               <div>
-                <h3 className="text-xl font-semibold text-foreground mb-2 group-hover:text-primary transition">
+                <h3 className="text-xl font-semibold mb-2 group-hover:text-primary transition">
                   {quiz.title}
                 </h3>
                 <p className="text-muted-foreground text-sm mb-3 line-clamp-3">
                   {quiz.description || "No description provided."}
                 </p>
                 <div className="flex items-center text-sm text-muted-foreground">
-                  <Clock className="w-4 h-4 mr-1" /> Duration: {quiz.duration || 10} min
+                  <Clock className="w-4 h-4 mr-1" /> Duration: {quiz.duration ?? 10} min
                 </div>
               </div>
 
               <div className="flex justify-between mt-4">
                 <button
                   onClick={(e) => handleEditQuiz(quiz, e)}
-                  className="flex items-center gap-2 bg-primary/10 text-primary font-medium py-2 px-3 rounded-lg hover:bg-primary/20 transition"
+                  className="flex items-center gap-2 bg-primary/10 text-primary font-medium px-3 py-2 rounded-lg hover:bg-primary/20 transition"
                 >
                   <Edit className="w-4 h-4" /> Edit
                 </button>
+
                 <button
                   onClick={(e) => handleDeleteQuiz(quiz.id, e)}
-                  className="flex items-center gap-2 bg-destructive/10 text-destructive font-medium py-2 px-3 rounded-lg hover:bg-destructive/20 transition"
+                  className="flex items-center gap-2 bg-destructive/10 text-destructive font-medium px-3 py-2 rounded-lg hover:bg-destructive/20 transition"
+                  disabled={deletingQuizId === quiz.id}
                 >
-                  <Trash2 className="w-4 h-4" /> Delete
+                  {deletingQuizId === quiz.id ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Trash2 className="w-4 h-4" />
+                  )}
+                  Delete
                 </button>
               </div>
             </div>
@@ -187,42 +216,35 @@ export default function MyQuizzes() {
             <h3 className="text-xl font-semibold mb-4">Edit Quiz</h3>
 
             <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-foreground mb-1">
-                  Title
-                </label>
+              <label className="block text-sm font-medium text-foreground">
+                Title
                 <input
-                  type="text"
+                  className="w-full mt-1 px-3 py-2 border rounded-lg bg-background"
                   value={newTitle}
                   onChange={(e) => setNewTitle(e.target.value)}
-                  className="w-full px-3 py-2 border border-border rounded-lg bg-background"
                 />
-              </div>
+              </label>
 
-              <div>
-                <label className="block text-sm font-medium text-foreground mb-1">
-                  Description
-                </label>
+              <label className="block text-sm font-medium text-foreground">
+                Description
                 <textarea
+                  className="w-full mt-1 px-3 py-2 border rounded-lg bg-background"
+                  rows={3}
                   value={newDescription}
                   onChange={(e) => setNewDescription(e.target.value)}
-                  className="w-full px-3 py-2 border border-border rounded-lg bg-background"
-                  rows={3}
                 />
-              </div>
+              </label>
 
-              <div>
-                <label className="block text-sm font-medium text-foreground mb-1">
-                  Duration (minutes)
-                </label>
+              <label className="block text-sm font-medium text-foreground">
+                Duration (minutes)
                 <input
                   type="number"
+                  className="w-full mt-1 px-3 py-2 border rounded-lg bg-background"
                   min={1}
                   value={newDuration}
                   onChange={(e) => setNewDuration(Number(e.target.value))}
-                  className="w-full px-3 py-2 border border-border rounded-lg bg-background"
                 />
-              </div>
+              </label>
             </div>
 
             <div className="flex justify-end mt-6 gap-3">
@@ -239,6 +261,7 @@ export default function MyQuizzes() {
                 Save Changes
               </button>
             </div>
+
           </div>
         </div>
       )}

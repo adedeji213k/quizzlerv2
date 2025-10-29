@@ -2,49 +2,34 @@ import { NextResponse } from "next/server";
 import OpenAI from "openai";
 import { supabaseServer } from "@/lib/supabaseServer";
 
-// 🧠 Initialize OpenAI client
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
 });
 
-// 🧩 Helper: Extract text from supported files
-async function extractTextFromFile(fileArrayBuffer: ArrayBuffer, mimeType: string) {
-  const buffer = Buffer.from(fileArrayBuffer);
-
-  if (mimeType.includes("pdf")) {
-    // Fallback: convert PDF to base64 and send to OpenAI for text extraction
-    // OpenAI can parse simple PDFs from text content
-    return buffer.toString("base64");
-  } else if (
-    mimeType.includes("word") ||
-    mimeType.includes("docx") ||
-    mimeType.includes("msword")
-  ) {
-    const mammoth = await import("mammoth");
-    const result = await mammoth.extractRawText({ buffer });
-    return result.value;
-  } else if (mimeType.includes("text")) {
-    return buffer.toString("utf-8");
-  } else {
-    throw new Error(`Unsupported file type: ${mimeType}`);
-  }
-}
-
-// 🧠 Main API handler
 export async function POST(req: Request) {
   try {
     const { quiz_id, document_id, requested_question_count, user_id } = await req.json();
 
     if (!quiz_id || !document_id || !requested_question_count || !user_id) {
-      return NextResponse.json(
-        { error: "Missing required fields" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
     }
 
-    console.log("🔍 Fetching document:", document_id);
+    // ✅ Step 1: Check all usage constraints first
+    const usageChecks = ["ai_calls", "documents_uploaded", "quizzes_created"];
+    for (const type of usageChecks) {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/api/usage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: user_id, type }),
+      });
 
-    // ✅ Fetch document from Supabase
+      if (res.status === 403) {
+        const data = await res.json();
+        return NextResponse.json(data, { status: 403 }); // 🚫 Block immediately
+      }
+    }
+
+    // ✅ Step 2: Fetch document from storage
     const { data: document, error: docError } = await supabaseServer
       .from("documents")
       .select("storage_path, mime, filename")
@@ -53,38 +38,26 @@ export async function POST(req: Request) {
 
     if (docError || !document) throw new Error("Document not found");
 
-    // ✅ Download file from Supabase Storage
     const { data: fileData, error: downloadError } = await supabaseServer.storage
       .from("documents")
       .download(document.storage_path);
+    if (downloadError || !fileData) throw new Error("Failed to download document");
 
-    if (downloadError || !fileData) throw new Error("Failed to download document from storage");
+    const buffer = Buffer.from(await fileData.arrayBuffer());
 
-    const fileArrayBuffer = await fileData.arrayBuffer();
+    // ✅ Step 3: Extract text
+    const mammoth = await import("mammoth");
+    const result = await mammoth.extractRawText({ buffer });
+    const extractedText = result.value.trim();
+    if (!extractedText) throw new Error("No text extracted from document");
 
-    // ✅ Extract text from file (PDFs now handled as base64)
-    const extractedText = await extractTextFromFile(fileArrayBuffer, document.mime);
-
-    if (!extractedText.trim()) {
-      throw new Error("No readable text extracted from file");
-    }
-
-    console.log("📝 Extracted text length:", extractedText.length);
-
-    // ✅ Generate quiz questions using OpenAI
-    const prompt = `Generate ${requested_question_count} multiple-choice questions from the following text.
-
-Each question should have 4 choices (A, B, C, D) and one correct answer.
-
-Return your response as a JSON array with this exact structure:
+    // ✅ Step 4: Generate questions
+   const prompt = `Generate ${requested_question_count} multiple-choice questions from the text below.
+Each question should have 4 options and one correct answer.
+Return JSON only in this format:
 [
-  {
-    "question": "question text here",
-    "choices": ["option A", "option B", "option C", "option D"],
-    "correct": "option B"
-  }
+  {"question": "string", "choices": ["A","B","C","D"], "correct_answer": "string"}
 ]
-
 Text:
 ${extractedText.slice(0, 12000)}`;
 
@@ -93,33 +66,30 @@ ${extractedText.slice(0, 12000)}`;
       messages: [
         {
           role: "system",
-          content: "You are a quiz generator. You must respond with valid JSON only, no markdown or explanations."
+          content: "You are a quiz generator. Reply in JSON only — no markdown, no explanations.",
         },
-        {
-          role: "user",
-          content: prompt
-        }
+        { role: "user", content: prompt },
       ],
-      response_format: { type: "json_object" },
       temperature: 0.7,
     });
 
+    // ✅ Step 5: Parse JSON output safely
     const content = response.choices[0].message?.content ?? "";
+    const cleanJSON = (t: string) =>
+      t.replace(/```json\s*/gi, "")
+        .replace(/```/g, "")
+        .replace(/^[^{\[]*/, "")
+        .replace(/[^}\]]*$/, "")
+        .trim();
 
-    let parsedResponse: any;
+    let questions;
     try {
-      parsedResponse = JSON.parse(content);
+      questions = JSON.parse(cleanJSON(content));
     } catch {
-      throw new Error("AI response was not valid JSON");
+      throw new Error("AI response was not valid JSON.");
     }
 
-    const questions: any[] = Array.isArray(parsedResponse)
-      ? parsedResponse
-      : parsedResponse.questions || [];
-
-    if (questions.length === 0) throw new Error("No questions were generated");
-
-    // ✅ Insert generated questions into DB
+    // ✅ Step 6: Save questions and choices
     for (const q of questions) {
       const { data: question, error: qError } = await supabaseServer
         .from("questions")
@@ -131,14 +101,13 @@ ${extractedText.slice(0, 12000)}`;
         })
         .select()
         .single();
-
       if (qError) throw qError;
 
       for (let i = 0; i < q.choices.length; i++) {
         await supabaseServer.from("choices").insert({
           question_id: question.id,
           text: q.choices[i],
-          is_correct: q.choices[i] === q.correct,
+          is_correct: q.choices[i].trim() === q.correct_answer.trim(),
           position: i,
         });
       }

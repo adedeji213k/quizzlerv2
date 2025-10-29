@@ -77,6 +77,7 @@ export default function RegisterPage() {
   return (
     <div className="relative min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-background via-muted to-background px-6">
       {/* Logo */}
+      <Link href="/">
       <div className="mb-8 flex items-center gap-3">
         <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-primary to-accent flex items-center justify-center shadow-[var(--shadow-glow)]">
           <Sparkles className="w-6 h-6 text-white" />
@@ -85,6 +86,7 @@ export default function RegisterPage() {
           Quizzler
         </span>
       </div>
+      </Link>
 
       {/* Register Card */}
       <div className="w-full max-w-md bg-card rounded-2xl shadow-[var(--shadow-elegant)] p-8 border border-border backdrop-blur-sm">

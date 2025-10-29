@@ -50,14 +50,17 @@ export async function POST(req: Request) {
   if (!user) {
     console.log("ℹ️ User not found in users table. Creating new record...");
 
-    const { data: authUsers, error: authError } =
-      await supabase.auth.admin.listUsers();
-    if (authError) {
-      console.error("⚠️ Error fetching auth users:", authError.message);
+    // ✅ Supabase v2 fix — use listUsers() with filter
+    const { data: usersData, error: listError } = await supabase.auth.admin.listUsers({
+      email: customerEmail,
+    });
+
+    if (listError) {
+      console.error("⚠️ Error fetching auth users:", listError.message);
       return new NextResponse("Auth error", { status: 500 });
     }
 
-    const authUser = authUsers.users.find((u) => u.email === customerEmail);
+    const authUser = usersData?.users?.[0];
     if (!authUser) {
       console.error("⚠️ User not found in auth.users:", customerEmail);
       return new NextResponse("Auth user not found", { status: 404 });
@@ -130,12 +133,12 @@ export async function POST(req: Request) {
   // 7️⃣ Upsert subscription record with aligned columns
   const { error: upsertError } = await supabase.from("subscriptions").upsert({
     user_id: user.id,
-    plan_id: plan?.id ?? null, // ✅ matches your schema
+    plan_id: plan?.id ?? null,
     stripe_customer_id: session.customer as string,
     stripe_subscription_id: subscription.id,
     status: subscription.status,
     current_period_end: currentPeriodEnd.toISOString(),
-    created_at: new Date().toISOString(), // ✅ optional, aligns with default
+    created_at: new Date().toISOString(),
   });
 
   if (upsertError) {

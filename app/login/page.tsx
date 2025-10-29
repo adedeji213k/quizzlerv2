@@ -50,6 +50,8 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-background via-muted to-background px-6">
       {/* Logo */}
+      <Link href="/">
+      
       <div className="mb-8 flex items-center gap-2">
         <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-primary to-accent flex items-center justify-center shadow-[var(--shadow-glow)]">
           <Sparkles className="w-7 h-7 text-white" />
@@ -58,6 +60,7 @@ export default function LoginPage() {
           Quizzler
         </span>
       </div>
+      </Link>
 
       {/* Login Card */}
       <div className="w-full max-w-md bg-card text-card-foreground rounded-2xl shadow-[var(--shadow-elegant)] p-8 border border-border">

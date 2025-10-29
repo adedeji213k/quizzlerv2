@@ -29,7 +29,7 @@ export default function QuizDetailsPage() {
   useEffect(() => {
     const fetchQuizData = async () => {
       try {
-        // ✅ Get the quiz info
+        // ✅ Load quiz
         const { data: quizData, error: quizError } = await supabase
           .from("quizzes")
           .select("*")
@@ -39,15 +39,30 @@ export default function QuizDetailsPage() {
         if (quizError) throw quizError;
         setQuiz(quizData);
 
-        // ✅ Get questions & choices
+        // ✅ Load questions only
         const { data: questionsData, error: qError } = await supabase
           .from("questions")
-          .select("id, text, type, choices(id, text, is_correct)")
+          .select("id, text, type")
           .eq("quiz_id", quizId);
 
         if (qError) throw qError;
 
-        setQuestions(questionsData || []);
+        // ✅ Load all choices at once
+        const questionIds = questionsData.map((q) => q.id);
+        const { data: choicesData, error: cError } = await supabase
+          .from("choices")
+          .select("id, text, is_correct, question_id")
+          .in("question_id", questionIds);
+
+        if (cError) throw cError;
+
+        // ✅ Format data by grouping choices by question
+        const formatted = questionsData.map((q) => ({
+          ...q,
+          choices: choicesData.filter((c) => c.question_id === q.id),
+        }));
+
+        setQuestions(formatted);
       } catch (err: any) {
         console.error("❌ Error loading quiz:", err.message);
       } finally {
@@ -84,6 +99,7 @@ export default function QuizDetailsPage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-muted to-background px-6 py-10">
       <div className="max-w-3xl mx-auto bg-card rounded-2xl shadow p-8 border border-border">
+        
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
@@ -119,18 +135,19 @@ export default function QuizDetailsPage() {
         {/* Questions */}
         {questions.length === 0 ? (
           <p className="text-muted-foreground text-center">
-            No questions yet. The AI might still be generating them.
+            No questions available yet.
           </p>
         ) : (
           <div className="space-y-6">
-            {questions.map((q, index) => (
+            {questions.map((q, i) => (
               <div
                 key={q.id}
                 className="bg-background/50 border border-border rounded-lg p-5 shadow-sm"
               >
                 <h3 className="font-semibold mb-3">
-                  {index + 1}. {q.text}
+                  {i + 1}. {q.text}
                 </h3>
+
                 <ul className="space-y-2">
                   {q.choices.map((choice) => (
                     <li
