@@ -1,10 +1,23 @@
 import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabaseServer";
 
+// ✅ New Plan Limits (based on your current pricing tiers)
 const PLAN_LIMITS = {
-  Free: { ai_calls: 10, documents_uploaded: 5, quizzes_created: 3 },
-  Standard: { ai_calls: 100, documents_uploaded: 50, quizzes_created: 25 },
-  Pro: { ai_calls: -1, documents_uploaded: -1, quizzes_created: -1 }, // Unlimited
+  Free: {
+    ai_calls: 50,               // up to 50 AI-generated questions per month
+    documents_uploaded: 3,      // up to 3 docs per month
+    quizzes_created: 5,         // up to 5 total quizzes
+  },
+  Standard: {
+    ai_calls: 400,              // 300–400 AI questions per month
+    documents_uploaded: 15,     // up to 15 docs per month
+    quizzes_created: 50,        // up to 50 quizzes total
+  },
+  Pro: {
+    ai_calls: -1,               // Unlimited
+    documents_uploaded: -1,     // Unlimited
+    quizzes_created: -1,        // Unlimited
+  },
 } as const;
 
 type PlanName = keyof typeof PLAN_LIMITS;
@@ -13,9 +26,12 @@ export async function POST(req: Request) {
   try {
     const { userId, type } = await req.json(); // type = "ai_calls" | "documents_uploaded" | "quizzes_created"
     if (!userId || !type)
-      return NextResponse.json({ error: "Missing parameters" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Missing parameters" },
+        { status: 400 }
+      );
 
-    // 1️⃣ Get user's latest subscription plan
+    // 1️⃣ Get user's active plan
     const { data: subData, error: subError } = await supabaseServer
       .from("subscriptions")
       .select("status, plan:plans(name)")
@@ -26,15 +42,15 @@ export async function POST(req: Request) {
 
     if (subError && subError.code !== "PGRST116") throw subError;
 
-    // Handle cases where plan may be an array or null
+    // 2️⃣ Determine plan name (handle array/object/null)
     let planName: string = "Free";
     if (Array.isArray(subData?.plan)) {
-      planName = subData?.plan[0]?.name || "Free";
+      planName = subData.plan[0]?.name || "Free";
     } else if (subData?.plan && typeof subData.plan === "object") {
       planName = (subData.plan as { name?: string })?.name || "Free";
     }
 
-    // ✅ Ensure valid plan key
+    // 3️⃣ Validate plan key
     const validPlan: PlanName = (["Free", "Standard", "Pro"].includes(planName)
       ? planName
       : "Free") as PlanName;
@@ -42,7 +58,7 @@ export async function POST(req: Request) {
     const limits = PLAN_LIMITS[validPlan];
     const limit = limits[type as keyof typeof limits] ?? 0;
 
-    // 2️⃣ Get or create usage record
+    // 4️⃣ Get or create usage record
     let { data: usage, error: usageError } = await supabaseServer
       .from("usage")
       .select("*")
@@ -55,6 +71,7 @@ export async function POST(req: Request) {
     const oneMonthAgo = new Date(now);
     oneMonthAgo.setMonth(now.getMonth() - 1);
 
+    // Create a new record if none exists
     if (!usage) {
       const { data: newUsage, error: insertError } = await supabaseServer
         .from("usage")
@@ -65,7 +82,7 @@ export async function POST(req: Request) {
       usage = newUsage;
     }
 
-    // 3️⃣ Reset monthly usage if older than 1 month
+    // 5️⃣ Reset monthly usage if older than one month
     const lastReset = new Date(usage.last_reset);
     if (lastReset < oneMonthAgo) {
       await supabaseServer
@@ -84,9 +101,8 @@ export async function POST(req: Request) {
       usage.quizzes_created = 0;
     }
 
-    // 4️⃣ Enforce usage limit
+    // 6️⃣ Enforce limit
     const current = usage[type] ?? 0;
-
     if (limit !== -1 && current >= limit) {
       return NextResponse.json(
         {
@@ -101,7 +117,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // 5️⃣ Increment and update usage
+    // 7️⃣ Increment usage count
     const newValue = current + 1;
     const { error: updateError } = await supabaseServer
       .from("usage")
@@ -113,6 +129,7 @@ export async function POST(req: Request) {
 
     if (updateError) throw updateError;
 
+    // ✅ Success response
     return NextResponse.json({
       success: true,
       type,
