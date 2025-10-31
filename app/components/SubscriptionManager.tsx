@@ -7,7 +7,7 @@ import { Loader2 } from "lucide-react";
 interface Plan {
   id: string;
   name: string;
-  monthly_price: number;
+  monthly_price: number; // stored in Kobo
   features: string[];
 }
 
@@ -27,14 +27,14 @@ export default function SubscriptionManager() {
     const fetchData = async () => {
       setLoading(true);
       try {
-        // Get session
+        // ✅ Get current session
         const {
           data: { session },
         } = await supabase.auth.getSession();
         if (!session) throw new Error("Not logged in");
         const userId = session.user.id;
 
-        // Fetch plans from Supabase
+        // ✅ Fetch plans
         const { data: plansData, error: plansError } = await supabase
           .from("plans")
           .select("id, name, monthly_price, features");
@@ -42,7 +42,7 @@ export default function SubscriptionManager() {
         if (plansError) throw plansError;
         setPlans(plansData || []);
 
-        // Fetch current subscription
+        // ✅ Fetch user subscription
         const { data: subData, error: subError } = await supabase
           .from("subscriptions")
           .select(
@@ -93,7 +93,7 @@ export default function SubscriptionManager() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          planId: plan.id, // ✅ now the real UUID from Supabase
+          planId: plan.id,
           userId: session.user.id,
         }),
       });
@@ -127,9 +127,7 @@ export default function SubscriptionManager() {
 
       {/* Current Plan */}
       <div className="bg-card border border-border rounded-xl shadow-md p-6">
-        <h3 className="text-xl font-semibold mb-3 text-foreground">
-          Current Plan
-        </h3>
+        <h3 className="text-xl font-semibold mb-3 text-foreground">Current Plan</h3>
         {subscription ? (
           <div className="space-y-2 text-sm text-muted-foreground">
             <p>
@@ -169,10 +167,17 @@ export default function SubscriptionManager() {
                 <h4 className="text-lg font-semibold mb-2 text-foreground">
                   {plan.name}
                 </h4>
+
+                {/* ✅ Convert Kobo → Naira */}
                 <p className="text-muted-foreground mb-3">
                   <strong className="text-foreground">Price:</strong>{" "}
-                  ₦{plan.monthly_price.toLocaleString()} / month
+                  ₦{(plan.monthly_price / 100).toLocaleString(undefined, {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}{" "}
+                  / month
                 </p>
+
                 <ul className="list-disc list-inside text-sm text-muted-foreground space-y-1">
                   {plan.features?.map((f, i) => (
                     <li key={i}>{f}</li>
