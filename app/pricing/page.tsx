@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Sparkles, Rocket, GraduationCap } from "lucide-react";
+import { Check, Sparkles, GraduationCap, Rocket } from "lucide-react";
 import Navbar from "../components/NavBar";
 import Footer from "../components/Footer";
 
@@ -9,19 +9,19 @@ const plans = [
     id: "free",
     name: "Free",
     icon: <Sparkles className="w-6 h-6 text-primary" />,
-    price: "$0",
+    price: "₦0",
     period: "/month",
-    description: "Perfect for casual users trying out Quizler for the first time.",
+    description: "Perfect for users exploring Quizler for the first time.",
     features: [
-      "Upload 1 document per month (1 quiz)",
-      "Generate up to 10 AI questions/month",
+      "Upload up to 3 documents per month",
+      "Generate up to 50 AI questions per month",
+      "Store up to 10 quizzes total",
       "Take quizzes and view past scores",
-      "Store up to 5 quizzes",
     ],
     limits: [
-      { name: "Document uploads", value: "1 / month" },
-      { name: "AI-generated questions", value: "10 / month" },
-      { name: "Quiz storage", value: "5 total" },
+      { name: "Document uploads", value: "3 / month" },
+      { name: "AI-generated questions", value: "50 / month" },
+      { name: "Quiz storage", value: "10 total" },
     ],
     highlight: false,
   },
@@ -29,21 +29,21 @@ const plans = [
     id: "standard",
     name: "Standard",
     icon: <GraduationCap className="w-6 h-6 text-primary" />,
-    price: "$9.99",
+    price: "₦4,999",
     period: "/month",
     description:
-      "Ideal for teachers and active learners who create quizzes frequently.",
+      "For teachers, students, and professionals who create quizzes regularly.",
     features: [
-      "Upload up to 10 documents/month (10 quizzes)",
-      "Generate up to 250 AI questions/month",
-      "Access basic quiz analytics (accuracy, averages)",
-      "Priority AI generation speed",
-      "Store up to 50 quizzes",
+      "Upload up to 15 documents per month",
+      "Generate 300–400 AI questions per month",
+      "Store up to 50 quizzes total",
       "Take unlimited quizzes",
+      "Faster AI generation speed (priority queue)",
+      "Access to basic quiz analytics",
     ],
     limits: [
-      { name: "Document uploads", value: "10 / month" },
-      { name: "AI-generated questions", value: "250 / month" },
+      { name: "Document uploads", value: "15 / month" },
+      { name: "AI-generated questions", value: "300–400 / month" },
       { name: "Quiz storage", value: "50 total" },
     ],
     highlight: true,
@@ -52,16 +52,16 @@ const plans = [
     id: "pro",
     name: "Pro",
     icon: <Rocket className="w-6 h-6 text-primary" />,
-    price: "$29.99",
+    price: "₦12,999",
     period: "/month",
     description:
-      "Built for schools, teams, and organizations running frequent quizzes.",
+      "Built for institutions, educators, and teams that rely heavily on AI quiz generation.",
     features: [
       "Unlimited document uploads",
       "Unlimited AI question generation",
-      "Advanced analytics & performance insights",
-      "Fastest AI generation speed",
       "Unlimited quiz storage",
+      "Fastest AI generation speed",
+      "Advanced analytics and performance insights",
       "Early access to new features",
     ],
     limits: [
@@ -82,11 +82,10 @@ export default function PricingPage() {
       <section className="py-20 text-center bg-gradient-to-r from-primary/10 to-accent/10">
         <div className="container mx-auto px-6">
           <h1 className="text-4xl sm:text-5xl font-bold mb-4 bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
-            Choose the Perfect Plan for You
+            Choose the Plan That Fits You
           </h1>
           <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-            Whether you're a casual learner or a large institution, Quizler has a
-            plan tailored to your needs — start for free and grow as you do.
+            Start free and upgrade anytime — whether you’re a learner, educator, or institution.
           </p>
         </div>
       </section>
@@ -146,8 +145,7 @@ export default function PricingPage() {
       <section className="py-20 text-center bg-gradient-to-r from-primary to-accent text-white">
         <h2 className="text-3xl font-bold mb-4">Ready to Get Started?</h2>
         <p className="mb-8 text-white/80 max-w-xl mx-auto">
-          Unlock the power of AI-generated quizzes and transform your learning
-          experience — all in one place.
+          Unlock the full power of AI quiz generation and transform your learning experience.
         </p>
         <a
           href="/register"

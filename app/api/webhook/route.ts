@@ -22,7 +22,7 @@ export async function POST(req: Request) {
     return new NextResponse(`Webhook Error: ${err.message}`, { status: 400 });
   }
 
-  // Only handle completed checkout sessions
+  // Handle only checkout completed events
   if (event.type !== "checkout.session.completed") {
     return NextResponse.json({ received: true });
   }
@@ -50,7 +50,7 @@ export async function POST(req: Request) {
   if (!user) {
     console.log("ℹ️ User not found in users table. Creating new record...");
 
-    // ✅ Supabase v2 fix — use listUsers() with filter
+    // ✅ Supabase v2 admin API fix
     const { data: usersData, error: listError } = await supabase.auth.admin.listUsers({
       email: customerEmail,
     });
@@ -95,7 +95,7 @@ export async function POST(req: Request) {
     return new NextResponse("Subscription not found", { status: 404 });
   }
 
-  // 3️⃣ Extract subscription item safely
+  // 3️⃣ Extract price ID
   const subscriptionItem = subscription.items.data[0];
   if (!subscriptionItem || !subscriptionItem.price?.id) {
     console.error("⚠️ Subscription has no items or price ID:", subscription.id);
@@ -104,7 +104,7 @@ export async function POST(req: Request) {
 
   const priceId = subscriptionItem.price.id;
 
-  // 4️⃣ Fetch corresponding plan from your `plans` table
+  // 4️⃣ Fetch plan from your `plans` table
   const { data: plan, error: planError } = await supabase
     .from("plans")
     .select("id, name")
@@ -115,22 +115,42 @@ export async function POST(req: Request) {
     console.error("⚠️ Could not find plan for price:", priceId, planError.message);
   }
 
-  // 🧹 5️⃣ Cancel/deactivate other active subscriptions for this user
-  const { error: deactivateError } = await supabase
+  // 🧹 5️⃣ Cancel old active subscriptions for this user (both on Stripe and locally)
+  const { data: oldSubs, error: oldSubError } = await supabase
     .from("subscriptions")
-    .update({ status: "canceled" })
+    .select("stripe_subscription_id, status")
     .eq("user_id", user.id)
-    .neq("stripe_subscription_id", subscription.id);
+    .neq("stripe_subscription_id", subscription.id)
+    .eq("status", "active");
 
-  if (deactivateError) {
-    console.error("⚠️ Failed to deactivate old subscriptions:", deactivateError.message);
+  if (oldSubError) {
+    console.error("⚠️ Error fetching old subscriptions:", oldSubError.message);
+  } else if (oldSubs && oldSubs.length > 0) {
+    for (const old of oldSubs) {
+      try {
+        await stripe.subscriptions.cancel(old.stripe_subscription_id);
+        console.log(`🗑️ Canceled old Stripe subscription: ${old.stripe_subscription_id}`);
+      } catch (cancelErr: any) {
+        console.error("⚠️ Stripe cancel failed:", cancelErr.message);
+      }
+    }
+
+    const { error: deactivateError } = await supabase
+      .from("subscriptions")
+      .update({ status: "canceled" })
+      .eq("user_id", user.id)
+      .neq("stripe_subscription_id", subscription.id);
+
+    if (deactivateError) {
+      console.error("⚠️ Failed to deactivate old subscriptions:", deactivateError.message);
+    }
   }
 
   // 6️⃣ Always set current_period_end to one month from now
   const currentPeriodEnd = new Date();
   currentPeriodEnd.setMonth(currentPeriodEnd.getMonth() + 1);
 
-  // 7️⃣ Upsert subscription record with aligned columns
+  // 7️⃣ Upsert subscription record in Supabase
   const { error: upsertError } = await supabase.from("subscriptions").upsert({
     user_id: user.id,
     plan_id: plan?.id ?? null,
@@ -146,7 +166,7 @@ export async function POST(req: Request) {
     return new NextResponse("Failed to upsert subscription", { status: 500 });
   }
 
-  // 8️⃣ Update user role based on plan or default
+  // 8️⃣ Update user role based on plan
   const planRoleMap: Record<string, string> = {
     price_standard: "standard",
     price_pro: "pro",

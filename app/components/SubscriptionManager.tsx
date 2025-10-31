@@ -7,8 +7,7 @@ import { Loader2 } from "lucide-react";
 interface Plan {
   id: string;
   name: string;
-  monthly_price: number; // in cents
-  ai_limit: number;
+  monthly_price: number;
   features: string[];
 }
 
@@ -28,23 +27,22 @@ export default function SubscriptionManager() {
     const fetchData = async () => {
       setLoading(true);
       try {
-        // Fetch all plans
-        const { data: plansData, error: plansError } = await supabase
-          .from("plans")
-          .select("*");
-        if (plansError) throw plansError;
-        setPlans(plansData || []);
-
         // Get session
         const {
           data: { session },
-          error: sessionError,
         } = await supabase.auth.getSession();
-        if (!session || sessionError) throw new Error("Not logged in");
-
+        if (!session) throw new Error("Not logged in");
         const userId = session.user.id;
 
-        // Fetch latest subscription
+        // Fetch plans from Supabase
+        const { data: plansData, error: plansError } = await supabase
+          .from("plans")
+          .select("id, name, monthly_price, features");
+
+        if (plansError) throw plansError;
+        setPlans(plansData || []);
+
+        // Fetch current subscription
         const { data: subData, error: subError } = await supabase
           .from("subscriptions")
           .select(
@@ -64,9 +62,8 @@ export default function SubscriptionManager() {
         if (subData && subData.length > 0) {
           const sub = subData[0];
           const plan = Array.isArray(sub.plan) ? sub.plan[0] : sub.plan;
-
           setSubscription({
-            plan_name: plan?.name ?? "Unknown Plan",
+            plan_name: plan?.name ?? "Unknown",
             status: sub.status ?? "inactive",
             current_period_end:
               sub.current_period_end ?? new Date().toISOString(),
@@ -74,9 +71,8 @@ export default function SubscriptionManager() {
         } else {
           setSubscription(null);
         }
-      } catch (err: any) {
+      } catch (err) {
         console.error("Error fetching subscription data:", err);
-        setSubscription(null);
       } finally {
         setLoading(false);
       }
@@ -90,21 +86,20 @@ export default function SubscriptionManager() {
     try {
       const {
         data: { session },
-        error: sessionError,
       } = await supabase.auth.getSession();
-      if (!session || sessionError) throw new Error("Not logged in");
+      if (!session) throw new Error("Not logged in");
 
-      const res = await fetch("/api/create-checkout-session", {
+      const res = await fetch("/api/paystack/init", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          planId: plan.id,
+          planId: plan.id, // ✅ now the real UUID from Supabase
           userId: session.user.id,
         }),
       });
 
       const data = await res.json();
-      if (!data.url) throw new Error(data.error || "Failed to get checkout URL");
+      if (!data.url) throw new Error(data.error || "Failed to start checkout");
 
       window.location.href = data.url;
     } catch (err: any) {
@@ -118,8 +113,7 @@ export default function SubscriptionManager() {
   if (loading) {
     return (
       <div className="flex justify-center items-center h-64 text-muted-foreground">
-        <Loader2 className="w-6 h-6 animate-spin mr-2" /> Loading subscription
-        data...
+        <Loader2 className="w-6 h-6 animate-spin mr-2" /> Loading subscription data...
       </div>
     );
   }
@@ -131,7 +125,7 @@ export default function SubscriptionManager() {
         Subscription & Billing
       </h2>
 
-      {/* Current Plan Card */}
+      {/* Current Plan */}
       <div className="bg-card border border-border rounded-xl shadow-md p-6">
         <h3 className="text-xl font-semibold mb-3 text-foreground">
           Current Plan
@@ -148,9 +142,7 @@ export default function SubscriptionManager() {
             </p>
             <p>
               <strong className="text-foreground">Renews:</strong>{" "}
-              {new Date(
-                subscription.current_period_end
-              ).toLocaleDateString()}
+              {new Date(subscription.current_period_end).toLocaleDateString()}
             </p>
           </div>
         ) : (
@@ -177,16 +169,12 @@ export default function SubscriptionManager() {
                 <h4 className="text-lg font-semibold mb-2 text-foreground">
                   {plan.name}
                 </h4>
-                <p className="text-muted-foreground mb-2">
-                  <strong className="text-foreground">Price:</strong>{" "}
-                  ${(plan.monthly_price / 100).toFixed(2)} / month
-                </p>
                 <p className="text-muted-foreground mb-3">
-                  <strong className="text-foreground">AI Limit:</strong>{" "}
-                  {plan.ai_limit > 100_000 ? "Unlimited" : plan.ai_limit}
+                  <strong className="text-foreground">Price:</strong>{" "}
+                  ₦{plan.monthly_price.toLocaleString()} / month
                 </p>
                 <ul className="list-disc list-inside text-sm text-muted-foreground space-y-1">
-                  {plan.features.map((f, i) => (
+                  {plan.features?.map((f, i) => (
                     <li key={i}>{f}</li>
                   ))}
                 </ul>
