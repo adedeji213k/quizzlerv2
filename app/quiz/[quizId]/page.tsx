@@ -39,7 +39,7 @@ export default function QuizDetailsPage() {
         if (quizError) throw quizError;
         setQuiz(quizData);
 
-        // ✅ Load questions only
+        // ✅ Load questions
         const { data: questionsData, error: qError } = await supabase
           .from("questions")
           .select("id, text, type")
@@ -47,7 +47,7 @@ export default function QuizDetailsPage() {
 
         if (qError) throw qError;
 
-        // ✅ Load all choices at once
+        // ✅ Load all choices
         const questionIds = questionsData.map((q) => q.id);
         const { data: choicesData, error: cError } = await supabase
           .from("choices")
@@ -56,7 +56,7 @@ export default function QuizDetailsPage() {
 
         if (cError) throw cError;
 
-        // ✅ Format data by grouping choices by question
+        // ✅ Combine questions + choices
         const formatted = questionsData.map((q) => ({
           ...q,
           choices: choicesData.filter((c) => c.question_id === q.id),
@@ -87,10 +87,10 @@ export default function QuizDetailsPage() {
       <div className="flex flex-col items-center justify-center h-screen">
         <p className="text-muted-foreground mb-4">Quiz not found.</p>
         <button
-          onClick={() => router.back()}
+          onClick={() => router.push("/dashboard")}
           className="flex items-center gap-2 px-4 py-2 text-sm bg-muted text-foreground rounded-lg hover:bg-accent transition"
         >
-          <ArrowLeft className="w-4 h-4" /> Go Back
+          <ArrowLeft className="w-4 h-4" /> Back to Dashboard
         </button>
       </div>
     );
@@ -109,7 +109,7 @@ export default function QuizDetailsPage() {
             <p className="text-muted-foreground mt-1">{quiz.description}</p>
           </div>
           <button
-            onClick={() => router.back()}
+            onClick={() => router.push("/dashboard")}
             className="flex items-center gap-2 text-sm px-3 py-2 rounded-lg bg-muted hover:bg-accent/10 transition"
           >
             <ArrowLeft className="w-4 h-4" /> Back
@@ -176,7 +176,7 @@ export default function QuizDetailsPage() {
         {questions.length > 0 && (
           <div className="mt-10 flex justify-center">
             <button
-              onClick={() => alert("Start quiz feature coming soon!")}
+              onClick={() => router.push(`/take-quiz/${quizId}`)}
               className="px-6 py-3 bg-gradient-to-r from-primary to-accent text-white rounded-lg shadow hover:opacity-90 transition"
             >
               Start Quiz

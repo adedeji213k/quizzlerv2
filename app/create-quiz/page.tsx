@@ -3,7 +3,14 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
-import { Loader2, Upload, FileText, PlusCircle, Eye, X, ArrowLeft } from "lucide-react";
+import {
+  Loader2,
+  Upload,
+  FileText,
+  PlusCircle,
+  X,
+  ArrowLeft,
+} from "lucide-react";
 
 export default function CreateQuizPage() {
   const [title, setTitle] = useState("");
@@ -13,7 +20,6 @@ export default function CreateQuizPage() {
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [aiGenerating, setAiGenerating] = useState(false);
-  const [quizId, setQuizId] = useState<number | null>(null);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [upgradePlan, setUpgradePlan] = useState<string | null>(null);
 
@@ -27,7 +33,6 @@ export default function CreateQuizPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-
     if (!file) return alert("Please select a document file to upload.");
 
     setLoading(true);
@@ -44,8 +49,11 @@ export default function CreateQuizPage() {
     }
 
     const user = session.user;
+    let createdQuizId: number | null = null;
+    let createdDocId: number | null = null;
+    let filePath: string | null = null;
 
-    // ✅ Step 0: Check usage limits before doing anything
+    // ✅ Step 0: Check usage limits
     try {
       const usageTypes = ["ai_calls", "documents_uploaded", "quizzes_created"];
 
@@ -58,27 +66,11 @@ export default function CreateQuizPage() {
 
         const data = await res.json();
 
-        console.log("🧾 Usage check →", {
-          type,
-          plan: data.plan,
-          used: data.used ?? "unknown",
-          limit: data.limit ?? "unknown",
-          remaining: data.remaining ?? "unknown",
-          status: res.status,
-        });
-
         if (res.status === 403) {
-          console.warn(
-            `🚫 BLOCKED: User (${user.id}) on ${data.plan} plan exceeded limit for ${type}.`
-          );
           setUpgradePlan(data.plan);
           setShowUpgradeModal(true);
           setLoading(false);
-          return; // 🚫 Stop if any limit exceeded
-        } else {
-          console.log(
-            `✅ ALLOWED: ${type} usage OK for ${data.plan} plan. Used: ${data.used}/${data.limit}`
-          );
+          return;
         }
       }
     } catch (err) {
@@ -96,18 +88,18 @@ export default function CreateQuizPage() {
           owner: user.id,
           title,
           description,
+          duration,
           is_published: false,
         })
         .select()
         .single();
-
       if (quizError) throw quizError;
-      const quizId = quizData.id;
-      setQuizId(quizId);
+
+      createdQuizId = quizData.id;
 
       // ✅ Step 2: Upload file to Supabase Storage
       const ext = file.name.split(".").pop();
-      const filePath = `${user.id}/${Date.now()}.${ext}`;
+      filePath = `${user.id}/${Date.now()}.${ext}`;
       const { error: uploadError } = await supabase.storage
         .from("documents")
         .upload(filePath, file);
@@ -127,28 +119,26 @@ export default function CreateQuizPage() {
         .single();
       if (docError) throw docError;
 
-      const documentId = docData.id;
+      createdDocId = docData.id;
 
       // ✅ Step 4: Log generation job
-      const { error: jobError } = await supabase.from("generation_jobs").insert({
+      await supabase.from("generation_jobs").insert({
         owner: user.id,
-        document_id: documentId,
-        quiz_id: quizId,
+        document_id: createdDocId,
+        quiz_id: createdQuizId,
         requested_question_count: numQuestions,
         requested_types: ["mcq"],
         status: "queued",
       });
-      if (jobError) throw jobError;
 
-      // ✅ Step 5: Trigger AI question generation
+      // ✅ Step 5: Generate AI Questions
       setAiGenerating(true);
-
       const res = await fetch("/api/generate-questions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          quiz_id: quizId,
-          document_id: documentId,
+          quiz_id: createdQuizId,
+          document_id: createdDocId,
           requested_question_count: numQuestions,
           user_id: user.id,
         }),
@@ -156,23 +146,33 @@ export default function CreateQuizPage() {
 
       const data = await res.json();
 
-      // 🚫 If AI usage limit reached → show upgrade modal
       if (res.status === 403 && data.upgrade) {
         setUpgradePlan(data.plan);
         setShowUpgradeModal(true);
         return;
       }
 
-      if (!res.ok) throw new Error(data.error || "Failed to generate questions");
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || "AI question generation failed.");
+      }
 
-      alert(
-        `✅ Quiz created successfully! AI generated ${
-          data.count || numQuestions
-        } questions.`
-      );
+      // ✅ Success → redirect straight to quiz page
+      router.push(`/quiz/${createdQuizId}`);
     } catch (err: any) {
       console.error("❌ Error creating quiz:", err);
-      alert("Error: " + err.message);
+
+      // 🧹 Rollback cleanup if generation fails
+      if (createdQuizId) {
+        await supabase.from("quizzes").delete().eq("id", createdQuizId);
+      }
+      if (createdDocId) {
+        await supabase.from("documents").delete().eq("id", createdDocId);
+      }
+      if (filePath) {
+        await supabase.storage.from("documents").remove([filePath]);
+      }
+
+      alert("Failed to generate quiz questions. Your quiz was not saved.");
     } finally {
       setAiGenerating(false);
       setLoading(false);
@@ -181,21 +181,21 @@ export default function CreateQuizPage() {
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-background via-muted to-background px-6">
-      <div className="w-full max-w-2xl bg-card rounded-2xl shadow-[var(--shadow-elegant)] p-8 border border-border">
-        {/* ✅ Back to Dashboard Button */}
-<button
-  onClick={() => router.push("/dashboard")}
-  className="flex items-center gap-2 text-sm px-3 py-2 mb-4 rounded-lg bg-muted hover:bg-accent/10 transition"
->
-  <ArrowLeft className="w-4 h-4" /> Back to Dashboard
-</button>
+      <div className="w-full max-w-2xl bg-card rounded-2xl shadow-lg p-8 border border-border">
+        {/* Back Button */}
+        <button
+          onClick={() => router.push("/dashboard")}
+          className="flex items-center gap-2 text-sm px-3 py-2 mb-4 rounded-lg bg-muted hover:bg-accent/10 transition"
+        >
+          <ArrowLeft className="w-4 h-4" /> Back to Dashboard
+        </button>
 
         <h1 className="text-3xl font-bold text-center mb-2 bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
           Create a New Quiz
         </h1>
         <p className="text-muted-foreground text-center mb-8">
-          Provide quiz details and upload your document. Our AI will generate the
-          questions automatically.
+          Upload your document and our AI will automatically generate quiz
+          questions.
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-6">
@@ -294,7 +294,7 @@ export default function CreateQuizPage() {
               </>
             ) : aiGenerating ? (
               <>
-                <Loader2 className="w-5 h-5 animate-spin" /> AI Generating
+                <Loader2 className="w-5 h-5 animate-spin" /> Generating
                 Questions...
               </>
             ) : (
@@ -304,21 +304,9 @@ export default function CreateQuizPage() {
             )}
           </button>
         </form>
-
-        {/* ✅ Show "View Questions" button */}
-        {quizId && !loading && !aiGenerating && (
-          <div className="mt-6 text-center">
-            <button
-              onClick={() => router.push(`/quiz/${quizId}`)}
-              className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-medium bg-gradient-to-r from-primary to-accent text-white rounded-lg shadow hover:opacity-90 transition"
-            >
-              <Eye className="w-4 h-4" /> View Questions
-            </button>
-          </div>
-        )}
       </div>
 
-      {/* ⚠️ Upgrade Modal */}
+      {/* Upgrade Modal */}
       {showUpgradeModal && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
           <div className="bg-card rounded-2xl p-8 w-full max-w-md shadow-lg border border-border relative">
@@ -340,14 +328,14 @@ export default function CreateQuizPage() {
 
             <div className="flex justify-center gap-4">
               <button
-  onClick={() => {
-    setShowUpgradeModal(false);
-    router.push("/dashboard?tab=subscription");
-  }}
-  className="bg-gradient-to-r from-primary to-accent text-white px-5 py-2 rounded-lg hover:opacity-90 transition"
->
-  Upgrade Plan
-</button>
+                onClick={() => {
+                  setShowUpgradeModal(false);
+                  router.push("/dashboard?tab=subscription");
+                }}
+                className="bg-gradient-to-r from-primary to-accent text-white px-5 py-2 rounded-lg hover:opacity-90 transition"
+              >
+                Upgrade Plan
+              </button>
               <button
                 onClick={() => setShowUpgradeModal(false)}
                 className="px-5 py-2 rounded-lg border border-border hover:bg-muted transition"

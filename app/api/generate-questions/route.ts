@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
 import { supabaseServer } from "@/lib/supabaseServer";
+import PDFParser from "pdf2json";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
@@ -14,7 +15,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
     }
 
-    // ✅ Step 1: Check all usage constraints first
+    // ✅ Step 1: Check usage limits
     const usageChecks = ["ai_calls", "documents_uploaded", "quizzes_created"];
     for (const type of usageChecks) {
       const res = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/api/usage`, {
@@ -22,20 +23,18 @@ export async function POST(req: Request) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userId: user_id, type }),
       });
-
       if (res.status === 403) {
         const data = await res.json();
-        return NextResponse.json(data, { status: 403 }); // 🚫 Block immediately
+        return NextResponse.json(data, { status: 403 });
       }
     }
 
-    // ✅ Step 2: Fetch document from storage
+    // ✅ Step 2: Fetch document from Supabase storage
     const { data: document, error: docError } = await supabaseServer
       .from("documents")
       .select("storage_path, mime, filename")
       .eq("id", document_id)
       .single();
-
     if (docError || !document) throw new Error("Document not found");
 
     const { data: fileData, error: downloadError } = await supabaseServer.storage
@@ -44,15 +43,63 @@ export async function POST(req: Request) {
     if (downloadError || !fileData) throw new Error("Failed to download document");
 
     const buffer = Buffer.from(await fileData.arrayBuffer());
+    const mime = document.mime.toLowerCase();
 
     // ✅ Step 3: Extract text
-    const mammoth = await import("mammoth");
-    const result = await mammoth.extractRawText({ buffer });
-    const extractedText = result.value.trim();
-    if (!extractedText) throw new Error("No text extracted from document");
+    let extractedText = "";
 
-    // ✅ Step 4: Generate questions
-   const prompt = `Generate ${requested_question_count} multiple-choice questions from the text below.
+    if (mime.includes("pdf") || document.filename.endsWith(".pdf")) {
+      // --- PDF PARSING using pdf2json ---
+      extractedText = await new Promise<string>((resolve, reject) => {
+        const pdfParser = new PDFParser();
+
+        pdfParser.on("pdfParser_dataError", (errData: any) =>
+          reject(new Error(errData.parserError))
+        );
+
+        pdfParser.on("pdfParser_dataReady", (pdfData: any) => {
+          const text = pdfData.Pages.map((page: any) =>
+            page.Texts.map((t: any) =>
+              decodeURIComponent(t.R.map((r: any) => r.T).join(""))
+            ).join(" ")
+          ).join("\n");
+          resolve(text.trim());
+        });
+
+        pdfParser.parseBuffer(buffer);
+      });
+    }
+    else if (
+      mime.includes("presentationml") ||
+      mime.includes("ms-powerpoint") ||
+      document.filename.endsWith(".pptx") ||
+      document.filename.endsWith(".ppt")
+    ) {
+      const officeParser = await import("officeparser");
+      extractedText = (await officeParser.parseOfficeAsync(buffer)).trim();
+    }
+    else if (
+      mime.includes("wordprocessingml") ||
+      mime.includes("msword") ||
+      document.filename.endsWith(".docx") ||
+      document.filename.endsWith(".doc")
+    ) {
+      const mammoth = await import("mammoth");
+      const result = await mammoth.extractRawText({ buffer });
+      extractedText = result.value.trim();
+    }
+    else if (mime.includes("text/plain")) {
+      extractedText = buffer.toString("utf-8").trim();
+    } else {
+      throw new Error(`Unsupported file type: ${mime}`);
+    }
+
+    if (!extractedText || extractedText.length < 50) {
+      throw new Error("No meaningful text extracted from document.");
+    }
+
+    // ✅ Step 4: Generate questions via OpenAI
+    const prompt = `Generate ${requested_question_count} multiple-choice questions from the text below.
 Each question should have 4 options and one correct answer.
 Return JSON only in this format:
 [
@@ -73,10 +120,10 @@ ${extractedText.slice(0, 12000)}`;
       temperature: 0.7,
     });
 
-    // ✅ Step 5: Parse JSON output safely
     const content = response.choices[0].message?.content ?? "";
     const cleanJSON = (t: string) =>
-      t.replace(/```json\s*/gi, "")
+      t
+        .replace(/```json\s*/gi, "")
         .replace(/```/g, "")
         .replace(/^[^{\[]*/, "")
         .replace(/[^}\]]*$/, "")
@@ -89,7 +136,7 @@ ${extractedText.slice(0, 12000)}`;
       throw new Error("AI response was not valid JSON.");
     }
 
-    // ✅ Step 6: Save questions and choices
+    // ✅ Step 5: Save questions + choices
     for (const q of questions) {
       const { data: question, error: qError } = await supabaseServer
         .from("questions")
