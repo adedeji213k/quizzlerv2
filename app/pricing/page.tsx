@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Check, Sparkles, GraduationCap, Rocket } from "lucide-react";
 import Navbar from "../components/NavBar";
 import Footer from "../components/Footer";
@@ -9,7 +10,7 @@ const plans = [
     id: "free",
     name: "Free",
     icon: <Sparkles className="w-6 h-6 text-primary" />,
-    price: "₦0",
+    price: 0,
     period: "/month",
     description: "Perfect for users exploring Quizler for the first time.",
     features: [
@@ -18,18 +19,13 @@ const plans = [
       "Store up to 10 quizzes total",
       "Take quizzes and view past scores",
     ],
-    limits: [
-      { name: "Document uploads", value: "3 / month" },
-      { name: "AI-generated questions", value: "50 / month" },
-      { name: "Quiz storage", value: "10 total" },
-    ],
     highlight: false,
   },
   {
     id: "standard",
     name: "Standard",
     icon: <GraduationCap className="w-6 h-6 text-primary" />,
-    price: "₦4,999",
+    price: 4999,
     period: "/month",
     description:
       "For teachers, students, and professionals who create quizzes regularly.",
@@ -41,18 +37,13 @@ const plans = [
       "Faster AI generation speed (priority queue)",
       "Access to basic quiz analytics",
     ],
-    limits: [
-      { name: "Document uploads", value: "15 / month" },
-      { name: "AI-generated questions", value: "300–400 / month" },
-      { name: "Quiz storage", value: "50 total" },
-    ],
     highlight: true,
   },
   {
     id: "pro",
     name: "Pro",
     icon: <Rocket className="w-6 h-6 text-primary" />,
-    price: "₦12,999",
+    price: 12999,
     period: "/month",
     description:
       "Built for institutions, educators, and teams that rely heavily on AI quiz generation.",
@@ -64,16 +55,32 @@ const plans = [
       "Advanced analytics and performance insights",
       "Early access to new features",
     ],
-    limits: [
-      { name: "Document uploads", value: "Unlimited" },
-      { name: "AI-generated questions", value: "Unlimited" },
-      { name: "Quiz storage", value: "Unlimited" },
-    ],
     highlight: false,
   },
 ];
 
 export default function PricingPage() {
+  const [usdRate, setUsdRate] = useState<number | null>(null);
+
+  // Fetch FX rate (NGN → USD)
+  useEffect(() => {
+    async function fetchRate() {
+      try {
+        const res = await fetch("https://api.exchangerate-api.com/v4/latest/NGN");
+        const data = await res.json();
+
+        // Correct conversion: 1 NGN -> USD
+        setUsdRate(data.rates.USD);
+      } catch (err) {
+        console.error("FX fetch failed:", err);
+
+        // fallback rate
+        setUsdRate(0.00065);
+      }
+    }
+    fetchRate();
+  }, []);
+
   return (
     <div className="min-h-screen flex flex-col bg-background text-foreground">
       <Navbar />
@@ -112,8 +119,17 @@ export default function PricingPage() {
 
               {/* Price */}
               <div className="mb-6">
-                <span className="text-4xl font-bold">{plan.price}</span>
+                <span className="text-4xl font-bold">
+                  ₦{plan.price.toLocaleString()}
+                </span>
                 <span className="text-muted-foreground text-sm">{plan.period}</span>
+
+                {/* USD Equivalent */}
+                {usdRate && (
+                  <div className="text-[11px] text-muted-foreground mt-1 opacity-70">
+                    ≈ ${ (plan.price * usdRate).toFixed(2) } USD
+                  </div>
+                )}
               </div>
 
               {/* Features */}
