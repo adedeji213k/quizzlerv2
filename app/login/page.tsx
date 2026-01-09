@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Sparkles, Eye, EyeOff, LogIn } from "lucide-react";
+import { Sparkles, Eye, EyeOff, LogIn, CheckCircle2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
@@ -11,9 +11,10 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const router = useRouter();
 
-  // ✅ If the user is already logged in, redirect them
+  // ✅ Redirect if already logged in
   useEffect(() => {
     const checkUser = async () => {
       const {
@@ -41,32 +42,39 @@ export default function LoginPage() {
     }
 
     if (data.session) {
-      // ✅ Supabase automatically persists session in localStorage
-      alert("Login successful!");
-      router.push("/dashboard");
+      setSuccessMessage("Login successful ✅");
+      // Hide toast after 2.5 seconds and navigate
+      setTimeout(() => {
+        setSuccessMessage(null);
+        router.push("/dashboard");
+      }, 2500);
     }
   };
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-background via-muted to-background px-6">
+    <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-background via-muted to-background px-6 relative">
+      {/* ✅ Success Toast */}
+      {successMessage && (
+        <div className="fixed top-4 right-4 bg-green-600 text-white px-3 sm:px-4 py-2 rounded-xl shadow-lg flex items-center gap-2 text-sm sm:text-base z-50">
+          <CheckCircle2 className="w-5 h-5 shrink-0" /> {successMessage}
+        </div>
+      )}
+
       {/* Logo */}
       <Link href="/">
-      
-      <div className="mb-8 flex items-center gap-2">
-        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-primary to-accent flex items-center justify-center shadow-[var(--shadow-glow)]">
-          <Sparkles className="w-7 h-7 text-white" />
+        <div className="mb-8 flex items-center gap-2">
+          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-primary to-accent flex items-center justify-center shadow-[var(--shadow-glow)]">
+            <Sparkles className="w-7 h-7 text-white" />
+          </div>
+          <span className="text-3xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
+            Quizzler
+          </span>
         </div>
-        <span className="text-3xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
-          Quizzler
-        </span>
-      </div>
       </Link>
 
       {/* Login Card */}
       <div className="w-full max-w-md bg-card text-card-foreground rounded-2xl shadow-[var(--shadow-elegant)] p-8 border border-border">
-        <h1 className="text-2xl font-semibold text-center mb-2">
-          Welcome back
-        </h1>
+        <h1 className="text-2xl font-semibold text-center mb-2">Welcome back</h1>
         <p className="text-muted-foreground text-center mb-8">
           Sign in to generate quizzes effortlessly.
         </p>
@@ -90,10 +98,7 @@ export default function LoginPage() {
 
           {/* Password Input */}
           <div>
-            <label
-              className="block text-sm font-medium mb-1"
-              htmlFor="password"
-            >
+            <label className="block text-sm font-medium mb-1" htmlFor="password">
               Password
             </label>
             <div className="relative">
@@ -111,11 +116,7 @@ export default function LoginPage() {
                 onClick={() => setShowPassword(!showPassword)}
                 className="absolute inset-y-0 right-3 flex items-center text-muted-foreground hover:text-foreground"
               >
-                {showPassword ? (
-                  <EyeOff className="w-5 h-5" />
-                ) : (
-                  <Eye className="w-5 h-5" />
-                )}
+                {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
               </button>
             </div>
           </div>

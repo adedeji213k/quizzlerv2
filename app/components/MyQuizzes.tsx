@@ -9,6 +9,7 @@ import {
   Loader2,
   Clock,
   CheckCircle2,
+  Share2,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 
@@ -126,6 +127,19 @@ export default function MyQuizzes() {
     fetchQuizzes();
   };
 
+  // ✅ Copy share link
+  const handleShareQuiz = async (quizId: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      const link = `${window.location.origin}/share/${quizId}`;
+      await navigator.clipboard.writeText(link);
+      setSuccessMessage("Link copied to clipboard ✅");
+      setTimeout(() => setSuccessMessage(null), 2500);
+    } catch (err) {
+      alert("Failed to copy link");
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex justify-center items-center h-[60vh] text-muted-foreground text-sm sm:text-base">
@@ -167,10 +181,19 @@ export default function MyQuizzes() {
             <div
               key={quiz.id}
               onClick={() => router.push(`/quiz/${quiz.id}`)}
-              className="cursor-pointer bg-card border border-border rounded-xl shadow-md p-5 sm:p-6 flex flex-col justify-between hover:shadow-lg hover:-translate-y-1 transition-all duration-200 group"
+              className="relative cursor-pointer bg-card border border-border rounded-xl shadow-md p-5 sm:p-6 flex flex-col justify-between hover:shadow-lg hover:-translate-y-1 transition-all duration-200 group"
             >
+              {/* 🔗 Share Button */}
+              <button
+                onClick={(e) => handleShareQuiz(quiz.id, e)}
+                className="absolute top-3 right-3 p-2 rounded-full bg-muted hover:bg-primary/10 text-muted-foreground hover:text-primary transition"
+                title="Copy share link"
+              >
+                <Share2 className="w-4 h-4" />
+              </button>
+
               <div>
-                <h3 className="text-lg sm:text-xl font-semibold mb-2 group-hover:text-primary transition break-words">
+                <h3 className="text-lg sm:text-xl font-semibold mb-2 group-hover:text-primary transition break-words pr-8">
                   {quiz.title}
                 </h3>
                 <p className="text-muted-foreground text-xs sm:text-sm mb-3 line-clamp-3 break-words">

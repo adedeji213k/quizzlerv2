@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
-import { Loader2, PlayCircle } from "lucide-react";
+import { Loader2, PlayCircle, Share2, CheckCircle2 } from "lucide-react";
 
 interface Quiz {
   id: number;
@@ -17,6 +17,7 @@ interface Quiz {
 export default function TakeQuiz() {
   const [quizzes, setQuizzes] = useState<Quiz[]>([]);
   const [loading, setLoading] = useState(true);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const router = useRouter();
 
   useEffect(() => {
@@ -51,8 +52,20 @@ export default function TakeQuiz() {
   }, []);
 
   const handleStartQuiz = (quizId: number) => {
-    // Navigate to /take-quiz/[id]
     router.push(`/take-quiz/${quizId}`);
+  };
+
+  // ✅ Copy share link
+  const handleShareQuiz = async (quizId: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      const link = `${window.location.origin}/share/${quizId}`;
+      await navigator.clipboard.writeText(link);
+      setSuccessMessage("Link copied to clipboard ✅");
+      setTimeout(() => setSuccessMessage(null), 2500);
+    } catch (err) {
+      alert("Failed to copy link");
+    }
   };
 
   if (loading) {
@@ -75,6 +88,13 @@ export default function TakeQuiz() {
 
   return (
     <div>
+      {/* ✅ Success Toast */}
+      {successMessage && (
+        <div className="fixed top-4 right-4 bg-green-600 text-white px-3 sm:px-4 py-2 rounded-xl shadow-lg flex items-center gap-2 text-sm sm:text-base z-50">
+          <CheckCircle2 className="w-5 h-5 shrink-0" /> {successMessage}
+        </div>
+      )}
+
       <h2 className="text-3xl font-bold mb-6 bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
         Available Quizzes
       </h2>
@@ -83,10 +103,19 @@ export default function TakeQuiz() {
         {quizzes.map((quiz) => (
           <div
             key={quiz.id}
-            className="bg-card border border-border rounded-xl shadow-md p-6 flex flex-col justify-between hover:shadow-lg transition"
+            className="relative bg-card border border-border rounded-xl shadow-md p-6 flex flex-col justify-between hover:shadow-lg transition"
           >
+            {/* 🔗 Share Button */}
+            <button
+              onClick={(e) => handleShareQuiz(quiz.id, e)}
+              className="absolute top-3 right-3 p-2 rounded-full bg-muted hover:bg-primary/10 text-muted-foreground hover:text-primary transition"
+              title="Copy share link"
+            >
+              <Share2 className="w-4 h-4" />
+            </button>
+
             <div>
-              <h3 className="text-xl font-semibold text-foreground mb-2">
+              <h3 className="text-xl font-semibold text-foreground mb-2 pr-8">
                 {quiz.title}
               </h3>
               <p className="text-muted-foreground text-sm mb-4 line-clamp-3">
