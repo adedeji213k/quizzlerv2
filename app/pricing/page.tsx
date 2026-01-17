@@ -25,7 +25,7 @@ const plans = [
     id: "standard",
     name: "Standard",
     icon: <GraduationCap className="w-6 h-6 text-primary" />,
-    price: 2500,
+    price: 1500,
     period: "/month",
     description:
       "For teachers, students, and professionals who create quizzes regularly.",
@@ -43,7 +43,7 @@ const plans = [
     id: "pro",
     name: "Pro",
     icon: <Rocket className="w-6 h-6 text-primary" />,
-    price: 6000,
+    price: 4000,
     period: "/month",
     description:
       "Built for institutions, educators, and teams that rely heavily on AI quiz generation.",

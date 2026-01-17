@@ -9,6 +9,12 @@ interface Choice {
   id: number;
   text: string;
   is_correct: boolean;
+  position: number; // ✅ 0-based index (0=A, 1=B, 2=C, 3=D)
+}
+
+interface Explanation {
+  correct: string;
+  incorrect: Record<string, string>; // keys: A, B, C, D
 }
 
 interface Question {
@@ -16,6 +22,9 @@ interface Question {
   text: string;
   type: string;
   choices: Choice[];
+  metadata?: {
+    explanation?: Explanation;
+  };
 }
 
 export default function QuizDetailsPage() {
@@ -42,24 +51,32 @@ export default function QuizDetailsPage() {
         // ✅ Load questions
         const { data: questionsData, error: qError } = await supabase
           .from("questions")
-          .select("id, text, type")
+          .select("id, text, type, metadata")
           .eq("quiz_id", quizId);
 
         if (qError) throw qError;
 
-        // ✅ Load all choices
+        if (!questionsData || questionsData.length === 0) {
+          setQuestions([]);
+          return;
+        }
+
+        // ✅ Load choices (WITH position)
         const questionIds = questionsData.map((q) => q.id);
+
         const { data: choicesData, error: cError } = await supabase
           .from("choices")
-          .select("id, text, is_correct, question_id")
+          .select("id, text, is_correct, question_id, position")
           .in("question_id", questionIds);
 
         if (cError) throw cError;
 
-        // ✅ Combine questions + choices
-        const formatted = questionsData.map((q) => ({
+        // ✅ Combine questions + sorted choices
+        const formatted: Question[] = questionsData.map((q) => ({
           ...q,
-          choices: choicesData.filter((c) => c.question_id === q.id),
+          choices: choicesData
+            .filter((c) => c.question_id === q.id)
+            .sort((a, b) => a.position - b.position),
         }));
 
         setQuestions(formatted);
@@ -88,7 +105,7 @@ export default function QuizDetailsPage() {
         <p className="text-muted-foreground mb-4">Quiz not found.</p>
         <button
           onClick={() => router.push("/dashboard")}
-          className="flex items-center gap-2 px-4 py-2 text-sm bg-muted text-foreground rounded-lg hover:bg-accent transition"
+          className="flex items-center gap-2 px-4 py-2 text-sm bg-muted rounded-lg"
         >
           <ArrowLeft className="w-4 h-4" /> Back to Dashboard
         </button>
@@ -99,18 +116,19 @@ export default function QuizDetailsPage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-muted to-background px-6 py-10">
       <div className="max-w-3xl mx-auto bg-card rounded-2xl shadow p-8 border border-border">
-        
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-3xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
               {quiz.title}
             </h1>
-            <p className="text-muted-foreground mt-1">{quiz.description}</p>
+            <p className="text-muted-foreground mt-1">
+              {quiz.description}
+            </p>
           </div>
           <button
             onClick={() => router.push("/dashboard")}
-            className="flex items-center gap-2 text-sm px-3 py-2 rounded-lg bg-muted hover:bg-accent/10 transition"
+            className="flex items-center gap-2 text-sm px-3 py-2 rounded-lg bg-muted"
           >
             <ArrowLeft className="w-4 h-4" /> Back
           </button>
@@ -139,36 +157,76 @@ export default function QuizDetailsPage() {
           </p>
         ) : (
           <div className="space-y-6">
-            {questions.map((q, i) => (
-              <div
-                key={q.id}
-                className="bg-background/50 border border-border rounded-lg p-5 shadow-sm"
-              >
-                <h3 className="font-semibold mb-3">
-                  {i + 1}. {q.text}
-                </h3>
+            {questions.map((q, i) => {
+              const explanation = q.metadata?.explanation;
 
-                <ul className="space-y-2">
-                  {q.choices.map((choice) => (
-                    <li
-                      key={choice.id}
-                      className={`flex items-center gap-2 px-3 py-2 rounded-md border ${
-                        choice.is_correct
-                          ? "border-green-500 bg-green-50/5"
-                          : "border-border"
-                      }`}
-                    >
-                      {choice.is_correct ? (
-                        <CheckCircle2 className="w-4 h-4 text-green-500" />
-                      ) : (
-                        <XCircle className="w-4 h-4 text-muted-foreground" />
-                      )}
-                      <span>{choice.text}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
+              return (
+                <div
+                  key={q.id}
+                  className="bg-background/50 border border-border rounded-lg p-5 shadow-sm"
+                >
+                  <h3 className="font-semibold mb-3">
+                    {i + 1}. {q.text}
+                  </h3>
+
+                  <ul className="space-y-2">
+                    {q.choices.map((choice) => (
+                      <li
+                        key={choice.id}
+                        className={`flex items-center gap-2 px-3 py-2 rounded-md border ${
+                          choice.is_correct
+                            ? "border-green-500 bg-green-500/10"
+                            : "border-border"
+                        }`}
+                      >
+                        {choice.is_correct ? (
+                          <CheckCircle2 className="w-4 h-4 text-green-500" />
+                        ) : (
+                          <XCircle className="w-4 h-4 text-muted-foreground" />
+                        )}
+                        <span>{choice.text}</span>
+                      </li>
+                    ))}
+                  </ul>
+
+                  {/* ✅ Structured Explanation */}
+                  {explanation && (
+                    <div className="mt-4 rounded-lg border border-border bg-muted/50 p-4 text-sm space-y-3">
+                      <div>
+                        <strong>Why the correct answer is correct</strong>
+                        <p className="text-muted-foreground mt-1">
+                          {explanation.correct}
+                        </p>
+                      </div>
+
+                      <div>
+                        <strong>Why the other options are incorrect</strong>
+                        <ul className="mt-2 space-y-1 list-disc list-inside text-muted-foreground">
+                          {q.choices
+                            .filter((c) => !c.is_correct)
+                            .map((c) => {
+                              // ✅ FIXED: position is 0-based
+                              const letter = String.fromCharCode(
+                                65 + c.position
+                              );
+
+                              return (
+                                <li key={c.id}>
+                                  <span className="font-medium">
+                                    {letter}. {c.text}:
+                                  </span>{" "}
+                                  {explanation.incorrect?.[letter] ??
+                                    "No explanation provided."}
+                                </li>
+                              );
+                            })}
+                        </ul>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
 
@@ -177,7 +235,7 @@ export default function QuizDetailsPage() {
           <div className="mt-10 flex justify-center">
             <button
               onClick={() => router.push(`/take-quiz/${quizId}`)}
-              className="px-6 py-3 bg-gradient-to-r from-primary to-accent text-white rounded-lg shadow hover:opacity-90 transition"
+              className="px-6 py-3 bg-gradient-to-r from-primary to-accent text-white rounded-lg"
             >
               Start Quiz
             </button>

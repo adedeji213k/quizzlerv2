@@ -3,13 +3,25 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
-import { Loader2, ArrowLeft, CheckCircle2, XCircle, Sparkles } from "lucide-react";
+import {
+  Loader2,
+  ArrowLeft,
+  CheckCircle2,
+  XCircle,
+  Sparkles,
+} from "lucide-react";
 
 interface Choice {
   id: number;
   text: string;
   is_correct: boolean;
   question_id: number;
+  position: number; // ✅ 0-based
+}
+
+interface Explanation {
+  correct: string;
+  incorrect: Record<string, string>; // A, B, C, D
 }
 
 interface Question {
@@ -17,6 +29,9 @@ interface Question {
   text: string;
   choices: Choice[];
   selected_choice_id?: number | null;
+  metadata?: {
+    explanation?: Explanation;
+  };
 }
 
 interface ShareResult {
@@ -54,7 +69,7 @@ export default function ShareResultPage() {
     const loadShareResult = async () => {
       setLoading(true);
       try {
-        // 1️⃣ Fetch shared quiz result
+        // 1️⃣ Shared quiz result
         const { data: resultData, error: resultError } = await supabase
           .from("share_quiz_results")
           .select("*, quizzes(title, description)")
@@ -64,36 +79,38 @@ export default function ShareResultPage() {
         if (resultError || !resultData) throw resultError;
         setResult(resultData);
 
-        // 2️⃣ Fetch answers
-        const { data: answers, error: answersError } = await supabase
-          .from("share_quiz_result_answers") // ✅ correct table name
+        // 2️⃣ Answers
+        const { data: answers } = await supabase
+          .from("share_quiz_result_answers")
           .select("question_id, selected_choice_id")
-          .eq("share_quiz_result_id", resultData.id); // ✅ correct column name
+          .eq("share_quiz_result_id", resultData.id);
 
-        if (answersError) console.error("Error loading answers:", answersError);
-
-        // 3️⃣ Fetch questions
+        // 3️⃣ Questions (WITH metadata)
         const { data: questionsData, error: qError } = await supabase
           .from("questions")
-          .select("*")
+          .select("id, text, metadata")
           .eq("quiz_id", resultData.quiz_id)
           .order("id", { ascending: true });
 
         if (qError || !questionsData) throw qError;
 
-        // 4️⃣ Fetch choices separately
+        // 4️⃣ Choices (WITH position)
         const questionIds = questionsData.map((q) => q.id);
         const { data: choicesData, error: cError } = await supabase
           .from("choices")
-          .select("*")
+          .select("id, text, is_correct, question_id, position")
           .in("question_id", questionIds);
 
-        if (cError) throw cError;
+        if (cError || !choicesData) throw cError;
 
-        // 5️⃣ Merge choices and selected answers
+        // 5️⃣ Merge everything
         const merged: Question[] = questionsData.map((q: Question) => {
-          const questionChoices = choicesData.filter((c) => c.question_id === q.id);
+          const questionChoices = choicesData
+            .filter((c) => c.question_id === q.id)
+            .sort((a, b) => a.position - b.position);
+
           const answer = answers?.find((a) => a.question_id === q.id);
+
           return {
             ...q,
             choices: questionChoices,
@@ -116,7 +133,9 @@ export default function ShareResultPage() {
     return (
       <div className="flex h-screen items-center justify-center">
         <Loader2 className="w-6 h-6 animate-spin text-primary" />
-        <span className="ml-2 text-muted-foreground">Loading result...</span>
+        <span className="ml-2 text-muted-foreground">
+          Loading result...
+        </span>
       </div>
     );
   }
@@ -129,7 +148,7 @@ export default function ShareResultPage() {
         </p>
         <button
           onClick={() => router.back()}
-          className="flex items-center gap-2 px-4 py-2 text-sm bg-muted text-foreground rounded-lg hover:bg-accent transition"
+          className="flex items-center gap-2 px-4 py-2 text-sm bg-muted rounded-lg"
         >
           <ArrowLeft className="w-4 h-4" /> Go Back
         </button>
@@ -137,7 +156,9 @@ export default function ShareResultPage() {
     );
   }
 
-  const percentage = Math.round((result.score / result.total_questions) * 100);
+  const percentage = Math.round(
+    (result.score / result.total_questions) * 100
+  );
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-muted to-background px-6 py-10">
@@ -150,25 +171,31 @@ export default function ShareResultPage() {
             <h1 className="text-3xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
               {result.quizzes?.title || "Quiz Result"}
             </h1>
-            <p className="text-muted-foreground mt-1">{result.quizzes?.description}</p>
+            <p className="text-muted-foreground mt-1">
+              {result.quizzes?.description}
+            </p>
             <p className="mt-1 text-sm text-muted-foreground">
-              Participant: <span className="font-semibold">{result.participant_name}</span>
+              Participant:{" "}
+              <span className="font-semibold">
+                {result.participant_name}
+              </span>
             </p>
           </div>
           <button
             onClick={() => router.back()}
-            className="flex items-center gap-2 text-sm px-3 py-2 rounded-lg bg-muted hover:bg-accent/10 transition"
+            className="flex items-center gap-2 text-sm px-3 py-2 rounded-lg bg-muted"
           >
             <ArrowLeft className="w-4 h-4" /> Back
           </button>
         </div>
 
-        {/* Score Info */}
-        <div className="mb-8 text-sm text-muted-foreground border-b border-border pb-4">
+        {/* Score */}
+        <div className="mb-8 text-sm border-b border-border pb-4">
           <p>
             <strong>Score:</strong>{" "}
-            <span className="text-foreground font-semibold">
-              {result.score}/{result.total_questions} ({percentage}%)
+            <span className="font-semibold">
+              {result.score}/{result.total_questions} (
+              {percentage}%)
             </span>
           </p>
           <p>
@@ -178,17 +205,25 @@ export default function ShareResultPage() {
         </div>
 
         {/* Questions */}
-        {questions.length === 0 ? (
-          <p className="text-muted-foreground text-center">No questions found for this quiz.</p>
-        ) : (
-          <div className="space-y-6">
-            {questions.map((q, i) => (
-              <div key={q.id} className="bg-background/50 border border-border rounded-xl p-5 shadow-sm">
-                <h3 className="font-semibold mb-3">{i + 1}. {q.text}</h3>
+        <div className="space-y-6">
+          {questions.map((q, i) => {
+            const explanation = q.metadata?.explanation;
+
+            return (
+              <div
+                key={q.id}
+                className="bg-background/50 border border-border rounded-xl p-5 shadow-sm"
+              >
+                <h3 className="font-semibold mb-3">
+                  {i + 1}. {q.text}
+                </h3>
+
                 <ul className="space-y-2">
                   {q.choices.map((choice) => {
-                    const isSelected = choice.id === q.selected_choice_id;
+                    const isSelected =
+                      choice.id === q.selected_choice_id;
                     const isCorrect = choice.is_correct;
+
                     return (
                       <li
                         key={choice.id}
@@ -212,16 +247,55 @@ export default function ShareResultPage() {
                     );
                   })}
                 </ul>
-              </div>
-            ))}
-          </div>
-        )}
 
-        {/* Retake Button */}
+                {/* ✅ Explanations */}
+                {explanation && (
+                  <div className="mt-4 rounded-lg border border-border bg-muted/50 p-4 text-sm space-y-3">
+                    <div>
+                      <strong>Why the correct answer is correct</strong>
+                      <p className="text-muted-foreground mt-1">
+                        {explanation.correct}
+                      </p>
+                    </div>
+
+                    <div>
+                      <strong>
+                        Why the other options are incorrect
+                      </strong>
+                      <ul className="mt-2 space-y-1 list-disc list-inside text-muted-foreground">
+                        {q.choices
+                          .filter((c) => !c.is_correct)
+                          .map((c) => {
+                            const letter = String.fromCharCode(
+                              65 + c.position
+                            );
+
+                            return (
+                              <li key={c.id}>
+                                <span className="font-medium">
+                                  {letter}. {c.text}:
+                                </span>{" "}
+                                {explanation.incorrect?.[letter] ??
+                                  "No explanation provided."}
+                              </li>
+                            );
+                          })}
+                      </ul>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Retake */}
         <div className="mt-10 flex justify-center">
           <button
-            onClick={() => router.push(`/share-quiz/${result.quiz_id}`)}
-            className="px-6 py-3 bg-gradient-to-r from-primary to-accent text-white rounded-xl shadow hover:opacity-90 transition"
+            onClick={() =>
+              router.push(`/share-quiz/${result.quiz_id}`)
+            }
+            className="px-6 py-3 bg-gradient-to-r from-primary to-accent text-white rounded-xl shadow"
           >
             Retake Quiz
           </button>

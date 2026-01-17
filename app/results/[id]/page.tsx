@@ -10,6 +10,12 @@ interface Choice {
   text: string;
   is_correct: boolean;
   question_id: number;
+  position: number; // ✅ 0-based (0=A, 1=B, 2=C...)
+}
+
+interface Explanation {
+  correct: string;
+  incorrect: Record<string, string>; // keys: A, B, C, D
 }
 
 interface Question {
@@ -17,6 +23,9 @@ interface Question {
   text: string;
   choices: Choice[];
   selected_choice_id?: number | null;
+  metadata?: {
+    explanation?: Explanation;
+  };
 }
 
 interface QuizResult {
@@ -44,7 +53,6 @@ export default function QuizResultPage() {
       try {
         setLoading(true);
 
-        // ✅ 1️⃣ Auth check
         const {
           data: { session },
         } = await supabase.auth.getSession();
@@ -54,7 +62,7 @@ export default function QuizResultPage() {
           return;
         }
 
-        // ✅ 2️⃣ Get quiz result + quiz info
+        // ✅ 1️⃣ Quiz result
         const { data: resultData, error: resultErr } = await supabase
           .from("quiz_results")
           .select("*, quizzes(title, description)")
@@ -62,31 +70,23 @@ export default function QuizResultPage() {
           .eq("user_id", session.user.id)
           .single();
 
-        if (resultErr || !resultData) {
-          console.error("❌ Error loading result:", resultErr);
-          setLoading(false);
-          return;
-        }
-
+        if (resultErr || !resultData) return;
         setResult(resultData);
 
-        // ✅ 3️⃣ Get answers
-        const { data: answers, error: answersError } = await supabase
+        // ✅ 2️⃣ User answers
+        const { data: answers } = await supabase
           .from("result_answers")
           .select("question_id, selected_choice_id")
           .eq("quiz_result_id", resultData.id);
 
-        if (answersError) {
-          console.error("❌ Error loading answers:", answersError);
-        }
-
-        // ✅ 4️⃣ Get questions + choices
+        // ✅ 3️⃣ Questions + choices + metadata
         const { data: questionsData, error: qError } = await supabase
           .from("questions")
           .select(
             `
             id,
             text,
+            metadata,
             choices (
               id,
               text,
@@ -99,24 +99,21 @@ export default function QuizResultPage() {
           .eq("quiz_id", resultData.quiz_id)
           .order("id", { ascending: true });
 
-        if (qError) {
-          console.error("❌ Error loading questions:", qError);
-          setLoading(false);
-          return;
-        }
+        if (qError) return;
 
-        // ✅ 5️⃣ Merge answers into questions
+        // ✅ 4️⃣ Merge answers
         const merged = (questionsData || []).map((q: Question) => {
           const answer = answers?.find((a) => a.question_id === q.id);
           return {
             ...q,
+            choices: q.choices.sort(
+              (a, b) => a.position - b.position
+            ),
             selected_choice_id: answer?.selected_choice_id ?? null,
           };
         });
 
         setQuestions(merged);
-      } catch (err) {
-        console.error("🔥 Unexpected error:", err);
       } finally {
         setLoading(false);
       }
@@ -129,7 +126,9 @@ export default function QuizResultPage() {
     return (
       <div className="flex h-screen items-center justify-center">
         <Loader2 className="w-6 h-6 animate-spin text-primary" />
-        <span className="ml-2 text-muted-foreground">Loading result...</span>
+        <span className="ml-2 text-muted-foreground">
+          Loading result...
+        </span>
       </div>
     );
   }
@@ -142,7 +141,7 @@ export default function QuizResultPage() {
         </p>
         <button
           onClick={() => router.back()}
-          className="flex items-center gap-2 px-4 py-2 text-sm bg-muted text-foreground rounded-lg hover:bg-accent transition"
+          className="flex items-center gap-2 px-4 py-2 text-sm bg-muted rounded-lg"
         >
           <ArrowLeft className="w-4 h-4" /> Go Back
         </button>
@@ -169,37 +168,32 @@ export default function QuizResultPage() {
           </div>
           <button
             onClick={() => router.back()}
-            className="flex items-center gap-2 text-sm px-3 py-2 rounded-lg bg-muted hover:bg-accent/10 transition"
+            className="flex items-center gap-2 text-sm px-3 py-2 rounded-lg bg-muted"
           >
             <ArrowLeft className="w-4 h-4" /> Back
           </button>
         </div>
 
-        {/* Score Info */}
-        <div className="mb-8 text-sm text-muted-foreground border-b border-border pb-4">
+        {/* Score */}
+        <div className="mb-8 text-sm border-b border-border pb-4">
           <p>
             <strong>Score:</strong>{" "}
-            <span className="text-foreground font-semibold">
-              {result.score}/{result.total_questions} ({percentage}%)
+            <span className="font-semibold">
+              {result.score}/{result.total_questions} (
+              {percentage}%)
             </span>
-          </p>
-          <p>
-            <strong>Date Taken:</strong>{" "}
-            {new Date(result.created_at).toLocaleDateString()}
           </p>
         </div>
 
         {/* Questions */}
-        {questions.length === 0 ? (
-          <p className="text-muted-foreground text-center">
-            No questions found for this quiz.
-          </p>
-        ) : (
-          <div className="space-y-6">
-            {questions.map((q, i) => (
+        <div className="space-y-6">
+          {questions.map((q, i) => {
+            const explanation = q.metadata?.explanation;
+
+            return (
               <div
                 key={q.id}
-                className="bg-background/50 border border-border rounded-lg p-5 shadow-sm"
+                className="bg-background/50 border rounded-lg p-5"
               >
                 <h3 className="font-semibold mb-3">
                   {i + 1}. {q.text}
@@ -207,7 +201,8 @@ export default function QuizResultPage() {
 
                 <ul className="space-y-2">
                   {q.choices.map((choice) => {
-                    const isSelected = choice.id === q.selected_choice_id;
+                    const isSelected =
+                      choice.id === q.selected_choice_id;
                     const isCorrect = choice.is_correct;
 
                     return (
@@ -233,16 +228,58 @@ export default function QuizResultPage() {
                     );
                   })}
                 </ul>
-              </div>
-            ))}
-          </div>
-        )}
 
-        {/* Retake Button */}
+                {/* ✅ Structured Explanation */}
+                {explanation && (
+                  <div className="mt-4 rounded-lg border border-border bg-muted/50 p-4 text-sm space-y-3">
+                    <div>
+                      <strong>
+                        Why the correct answer is correct
+                      </strong>
+                      <p className="text-muted-foreground mt-1">
+                        {explanation.correct}
+                      </p>
+                    </div>
+
+                    <div>
+                      <strong>
+                        Why the other options are incorrect
+                      </strong>
+                      <ul className="mt-2 space-y-1 list-disc list-inside text-muted-foreground">
+                        {q.choices
+                          .filter((c) => !c.is_correct)
+                          .map((c) => {
+                            // ✅ FIXED: 0-based → A/B/C/D
+                            const letter = String.fromCharCode(
+                              65 + c.position
+                            );
+
+                            return (
+                              <li key={c.id}>
+                                <span className="font-medium">
+                                  {letter}. {c.text}:
+                                </span>{" "}
+                                {explanation.incorrect?.[letter] ??
+                                  "No explanation provided."}
+                              </li>
+                            );
+                          })}
+                      </ul>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Retake */}
         <div className="mt-10 flex justify-center">
           <button
-            onClick={() => router.push(`/take-quiz/${result.quiz_id}`)}
-            className="px-6 py-3 bg-gradient-to-r from-primary to-accent text-white rounded-lg shadow hover:opacity-90 transition"
+            onClick={() =>
+              router.push(`/take-quiz/${result.quiz_id}`)
+            }
+            className="px-6 py-3 bg-gradient-to-r from-primary to-accent text-white rounded-lg"
           >
             Retake Quiz
           </button>
