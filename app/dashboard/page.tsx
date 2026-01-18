@@ -12,6 +12,8 @@ import {
   User,
   ChevronLeft,
   ChevronRight,
+  X,
+  Share2,
 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
@@ -20,6 +22,8 @@ import MyQuizzes from "../components/MyQuizzes";
 import Results from "../components/Results";
 import SubscriptionManager from "../components/SubscriptionManager";
 import UserSettings from "../components/UserSettings";
+import gif from "@/app/assets/gif.gif"
+import Image from "next/image";
 
 interface SubscriptionInfo {
   plan: string;
@@ -34,12 +38,19 @@ function DashboardInner() {
   const [showSubscriptionManager, setShowSubscriptionManager] = useState(false);
   const [showUserSettings, setShowUserSettings] = useState(false);
   const [user, setUser] = useState<any>(null);
+  const [showShareModal, setShowShareModal] = useState(false);
 
   const router = useRouter();
   const searchParams = useSearchParams();
 
   useEffect(() => {
-    // 🔹 Collapse automatically on tablet (≤1024px)
+    // 🔹 Modal Logic: Show once per session
+    const hasSeenModal = sessionStorage.getItem("hasSeenShareModal");
+    if (!hasSeenModal) {
+      setShowShareModal(true);
+      sessionStorage.setItem("hasSeenShareModal", "true");
+    }
+
     const handleResize = () => {
       if (window.innerWidth <= 1024) {
         setCollapsed(true);
@@ -140,6 +151,45 @@ function DashboardInner() {
 
   return (
     <div className="flex h-screen overflow-hidden bg-gradient-to-br from-background via-muted to-background text-foreground">
+      
+      {/* --- Share Notification Modal --- */}
+      {showShareModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-300">
+          <div className="bg-card border border-border w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
+            <div className="relative p-6 flex flex-col items-center text-center">
+              <button 
+                onClick={() => setShowShareModal(false)}
+                className="absolute right-4 top-4 text-muted-foreground hover:text-foreground transition"
+              >
+                <X size={20} />
+              </button>
+              
+              <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mb-4">
+                <Share2 className="text-primary w-8 h-8" />
+              </div>
+
+              <h3 className="text-xl font-bold mb-2">New: Instant Sharing!</h3>
+              <p className="text-muted-foreground mb-6">
+                You can now share your quizzes with friends using a single link. Just copy, paste, and start competing!
+              </p>
+
+              {/* PLACE FOR YOUR IMAGE OR GIF */}
+              <div className="w-full aspect-video bg-muted rounded-xl mb-6 flex items-center justify-center overflow-hidden border border-border">
+                {/* <img src="/your-gif-or-image.gif" alt="Sharing demo" className="w-full h-full object-cover" /> */}
+                <p className="text-xs text-muted-foreground italic"><Image alt="" src={gif} /></p>
+              </div>
+
+              <button
+                onClick={() => setShowShareModal(false)}
+                className="w-full py-3 bg-primary text-primary-foreground font-semibold rounded-xl hover:opacity-90 transition shadow-lg shadow-primary/20"
+              >
+                Got it!
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Sidebar */}
       <aside
         className={`${
@@ -183,6 +233,7 @@ function DashboardInner() {
                 setActive(item.id);
                 setShowSubscriptionManager(false);
                 setShowUserSettings(false);
+                setActive("");
               }}
               className={`flex items-center w-full px-4 py-3 rounded-lg text-sm font-medium transition-all duration-200 ${
                 active === item.id
