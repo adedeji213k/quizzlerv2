@@ -233,7 +233,7 @@ function DashboardInner() {
                 setActive(item.id);
                 setShowSubscriptionManager(false);
                 setShowUserSettings(false);
-                setActive("");
+                
               }}
               className={`flex items-center w-full px-4 py-3 rounded-lg text-sm font-medium transition-all duration-200 ${
                 active === item.id
