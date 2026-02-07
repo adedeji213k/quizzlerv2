@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import crypto from "crypto";
-import { supabase } from "@/lib/supabaseClient";
+import { supabaseServer } from "@/lib/supabaseServer";
 
 const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY!;
 
@@ -33,28 +33,65 @@ export async function POST(req: Request) {
     // Extract relevant metadata
     const metadata = data?.metadata || {};
     const userId = metadata.userId;
-    const planId = metadata.planId;
 
-    if (!userId || !planId) {
-      console.error("⚠️ Missing userId or planId in metadata");
+    if (!userId) {
+      console.error("⚠️ Missing userId in metadata");
       return new NextResponse("Invalid metadata", { status: 400 });
     }
 
-    // 1️⃣ Confirm the payment on Paystack (optional double check)
-    const verifyRes = await fetch(`https://api.paystack.co/transaction/verify/${data.reference}`, {
-      headers: {
-        Authorization: `Bearer ${PAYSTACK_SECRET}`,
-      },
-    });
+    // ----------------------------
+    // 1️⃣ Handle credit purchase
+    // ----------------------------
+    if (metadata.type === "credits") {
+      const creditsToAdd = metadata.credits || 0;
 
+      if (creditsToAdd <= 0) {
+        console.error("⚠️ Invalid credits amount in metadata");
+        return new NextResponse("Invalid credits metadata", { status: 400 });
+      }
+
+      // Upsert the user's credits balance
+      const { error } = await supabaseServer
+        .from("credits_balance")
+        .upsert({
+          id: userId,
+          balance: supabaseServer.raw(`COALESCE(balance, 0) + ${creditsToAdd}`),
+          updated_at: new Date().toISOString(),
+        });
+
+      if (error) {
+        console.error("❌ Failed to update credits:", error.message);
+        return new NextResponse("Failed to update credits", { status: 500 });
+      }
+
+      console.log(`✅ Added ${creditsToAdd} credits to user ${userId}`);
+      return NextResponse.json({ received: true });
+    }
+
+    // ----------------------------
+    // 2️⃣ Handle subscriptions (existing logic)
+    // ----------------------------
+    const planId = metadata.planId;
+    if (!planId) {
+      console.error("⚠️ Missing planId in metadata for subscription purchase");
+      return new NextResponse("Invalid metadata", { status: 400 });
+    }
+
+    // Confirm the payment on Paystack (optional)
+    const verifyRes = await fetch(
+      `https://api.paystack.co/transaction/verify/${data.reference}`,
+      {
+        headers: { Authorization: `Bearer ${PAYSTACK_SECRET}` },
+      }
+    );
     const verifyData = await verifyRes.json();
     if (!verifyData.status || verifyData.data.status !== "success") {
       console.error("⚠️ Payment verification failed:", verifyData.message);
       return new NextResponse("Payment verification failed", { status: 400 });
     }
 
-    // 2️⃣ Fetch plan details
-    const { data: plan, error: planError } = await supabase
+    // Fetch plan details
+    const { data: plan, error: planError } = await supabaseServer
       .from("plans")
       .select("id, name")
       .eq("id", planId)
@@ -65,11 +102,11 @@ export async function POST(req: Request) {
       return new NextResponse("Plan not found", { status: 404 });
     }
 
-    // 3️⃣ Create or update subscription
+    // Create or update subscription
     const currentPeriodEnd = new Date();
     currentPeriodEnd.setMonth(currentPeriodEnd.getMonth() + 1);
 
-    const { error: subError } = await supabase.from("subscriptions").upsert({
+    const { error: subError } = await supabaseServer.from("subscriptions").upsert({
       user_id: userId,
       plan_id: plan.id,
       status: "active",
@@ -82,7 +119,7 @@ export async function POST(req: Request) {
       return new NextResponse("Failed to update subscription", { status: 500 });
     }
 
-    // 4️⃣ Update user role
+    // Update user role
     const newRole =
       plan.name.toLowerCase() === "pro"
         ? "pro"
@@ -90,7 +127,7 @@ export async function POST(req: Request) {
         ? "standard"
         : "free";
 
-    const { error: userError } = await supabase
+    const { error: userError } = await supabaseServer
       .from("users")
       .update({ role: newRole })
       .eq("id", userId);

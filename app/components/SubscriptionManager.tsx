@@ -14,8 +14,30 @@ interface Plan {
 interface Subscription {
   plan_name: string;
   status: string;
-  current_period_end: string;
+  current_period_end: string | null;
 }
+
+const CREDIT_BUNDLES = [
+  {
+    id: "credits_5",
+    price: 20000, // kobo
+    credits: 5,
+    label: "₦200 → 1 quiz",
+  },
+  {
+    id: "credits_15",
+    price: 50000,
+    credits: 15,
+    label: "₦500 → 3 quizzes",
+  },
+  {
+    id: "credits_35",
+    price: 100000,
+    credits: 35,
+    label: "₦1,000 → 7 quizzes",
+  },
+];
+
 
 export default function SubscriptionManager() {
   const [loading, setLoading] = useState(true);
@@ -23,26 +45,41 @@ export default function SubscriptionManager() {
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
 
+  /* ---------------------------
+     Helpers
+  ---------------------------- */
+  const currentPlanName = subscription?.plan_name ?? "Free";
+
+  const isFreePlan = (plan: Plan) => plan.monthly_price === 0;
+
+  const isCurrentPlan = (plan: Plan) =>
+    plan.name.toLowerCase() === currentPlanName.toLowerCase();
+
+  /* ---------------------------
+     Fetch data
+  ---------------------------- */
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true);
       try {
-        // ✅ Get current session
         const {
           data: { session },
         } = await supabase.auth.getSession();
+
         if (!session) throw new Error("Not logged in");
+
         const userId = session.user.id;
 
-        // ✅ Fetch plans
+        // Fetch plans
         const { data: plansData, error: plansError } = await supabase
           .from("plans")
-          .select("id, name, monthly_price, features");
+          .select("id, name, monthly_price, features")
+          .order("monthly_price", { ascending: true });
 
         if (plansError) throw plansError;
         setPlans(plansData || []);
 
-        // ✅ Fetch user subscription
+        // Fetch latest subscription
         const { data: subData, error: subError } = await supabase
           .from("subscriptions")
           .select(
@@ -50,7 +87,7 @@ export default function SubscriptionManager() {
             status,
             current_period_end,
             created_at,
-            plan:plans(id, name)
+            plan:plans(name)
           `
           )
           .eq("user_id", userId)
@@ -62,11 +99,11 @@ export default function SubscriptionManager() {
         if (subData && subData.length > 0) {
           const sub = subData[0];
           const plan = Array.isArray(sub.plan) ? sub.plan[0] : sub.plan;
+
           setSubscription({
-            plan_name: plan?.name ?? "Unknown",
+            plan_name: plan?.name ?? "Free",
             status: sub.status ?? "inactive",
-            current_period_end:
-              sub.current_period_end ?? new Date().toISOString(),
+            current_period_end: sub.current_period_end,
           });
         } else {
           setSubscription(null);
@@ -81,12 +118,16 @@ export default function SubscriptionManager() {
     fetchData();
   }, []);
 
+  /* ---------------------------
+     Paid upgrade (Paystack)
+  ---------------------------- */
   const handleUpgrade = async (plan: Plan) => {
     setCheckoutLoading(true);
     try {
       const {
         data: { session },
       } = await supabase.auth.getSession();
+
       if (!session) throw new Error("Not logged in");
 
       const res = await fetch("/api/paystack/init", {
@@ -103,78 +144,176 @@ export default function SubscriptionManager() {
 
       window.location.href = data.url;
     } catch (err: any) {
-      console.error("Checkout error:", err);
-      alert("Failed to start checkout: " + err.message);
+      console.error(err);
+      alert("Failed to start checkout");
     } finally {
       setCheckoutLoading(false);
     }
   };
 
+  /* ---------------------------
+     Downgrade to FREE (no Paystack)
+  ---------------------------- */
+  const handleDowngradeToFree = async () => {
+    const confirmDowngrade = confirm(
+      "Downgrading will remove paid features. Continue?"
+    );
+    if (!confirmDowngrade) return;
+
+    setCheckoutLoading(true);
+
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session) throw new Error("Not logged in");
+
+      const userId = session.user.id;
+      const freePlan = plans.find((p) => p.monthly_price === 0);
+
+      if (!freePlan) throw new Error("Free plan not found");
+
+      // Cancel active subscription
+      await supabase
+        .from("subscriptions")
+        .update({ status: "cancelled" })
+        .eq("user_id", userId)
+        .eq("status", "active");
+
+      // Insert free subscription
+      await supabase.from("subscriptions").insert({
+        user_id: userId,
+        plan_id: freePlan.id,
+        status: "active",
+        current_period_end: null,
+      });
+
+      window.location.reload();
+    } catch (err) {
+      console.error(err);
+      alert("Failed to downgrade");
+    } finally {
+      setCheckoutLoading(false);
+    }
+  };
+
+  /* ---------------------------
+     Loading
+  ---------------------------- */
   if (loading) {
     return (
       <div className="flex justify-center items-center h-64 text-muted-foreground">
-        <Loader2 className="w-6 h-6 animate-spin mr-2" /> Loading subscription data...
+        <Loader2 className="w-6 h-6 animate-spin mr-2" />
+        Loading subscription data...
       </div>
     );
   }
 
+  /* ---------------------------
+     UI
+  ---------------------------- */
   return (
     <div className="max-w-5xl mx-auto space-y-8">
-      {/* Header */}
       <h2 className="text-3xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
         Subscription & Billing
       </h2>
 
       {/* Current Plan */}
       <div className="bg-card border border-border rounded-xl shadow-md p-6">
-        <h3 className="text-xl font-semibold mb-3 text-foreground">Current Plan</h3>
-        {subscription ? (
-          <div className="space-y-2 text-sm text-muted-foreground">
-            <p>
-              <strong className="text-foreground">Plan:</strong>{" "}
-              {subscription.plan_name}
-            </p>
-            <p>
-              <strong className="text-foreground">Status:</strong>{" "}
-              {subscription.status}
-            </p>
-            <p>
-              <strong className="text-foreground">Renews:</strong>{" "}
-              {new Date(subscription.current_period_end).toLocaleDateString()}
-            </p>
-          </div>
-        ) : (
-          <p className="text-muted-foreground">
-            You are currently on the{" "}
-            <span className="text-foreground font-medium">Free</span> plan.
+        <h3 className="text-xl font-semibold mb-3">Current Plan</h3>
+
+        <p className="text-sm text-muted-foreground">
+          <strong className="text-foreground">Plan:</strong>{" "}
+          {currentPlanName}
+        </p>
+
+        {subscription?.current_period_end && (
+          <p className="text-sm text-muted-foreground mt-1">
+            <strong className="text-foreground">Renews:</strong>{" "}
+            {new Date(subscription.current_period_end).toLocaleDateString()}
           </p>
         )}
       </div>
 
-      {/* Available Plans */}
+      
+      {/* Credit Bundles */}
+<div className="bg-card border border-border rounded-xl shadow-md p-6">
+  <h3 className="text-xl font-semibold mb-4">Buy Quiz Credits</h3>
+
+  <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
+    {CREDIT_BUNDLES.map((bundle) => (
+      <div
+        key={bundle.id}
+        className="bg-background border border-border rounded-xl p-6 flex flex-col justify-between"
+      >
+        <div>
+          <h4 className="text-lg font-semibold mb-2">
+            {bundle.credits} Credits
+          </h4>
+          <p className="text-muted-foreground mb-3">
+            {bundle.label}
+          </p>
+        </div>
+
+        <button
+          disabled={checkoutLoading}
+          onClick={async () => {
+            setCheckoutLoading(true);
+            try {
+              const {
+                data: { session },
+              } = await supabase.auth.getSession();
+
+              if (!session) throw new Error("Not logged in");
+
+              const res = await fetch("/api/paystack/init-credits", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  bundleId: bundle.id,
+                  userId: session.user.id,
+                }),
+              });
+
+              const data = await res.json();
+              if (!data.url) throw new Error("Failed to start checkout");
+
+              window.location.href = data.url;
+            } catch (e) {
+              alert("Failed to start credit purchase");
+            } finally {
+              setCheckoutLoading(false);
+            }
+          }}
+          className="mt-4 w-full py-2 rounded-lg text-white font-medium bg-gradient-to-r from-primary to-accent"
+        >
+          Buy Credits
+        </button>
+      </div>
+    ))}
+  </div>
+</div>
+
+
+      {/* Plans */}
       <div className="bg-card border border-border rounded-xl shadow-md p-6">
-        <h3 className="text-xl font-semibold mb-4 text-foreground">
-          Upgrade Your Plan
-        </h3>
+        <h3 className="text-xl font-semibold mb-4">Plans</h3>
 
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
           {plans.map((plan) => (
             <div
               key={plan.id}
-              className="bg-background border border-border rounded-xl shadow-sm p-6 flex flex-col justify-between hover:shadow-lg hover:-translate-y-1 transition-all duration-200"
+              className="bg-background border border-border rounded-xl p-6 flex flex-col justify-between transition hover:shadow-lg"
             >
               <div>
-                <h4 className="text-lg font-semibold mb-2 text-foreground">
-                  {plan.name}
-                </h4>
+                <h4 className="text-lg font-semibold mb-2">{plan.name}</h4>
 
-                {/* ✅ Convert Kobo → Naira */}
                 <p className="text-muted-foreground mb-3">
-                  <strong className="text-foreground">Price:</strong>{" "}
-                  ₦{(plan.monthly_price / 100).toLocaleString(undefined, {
+                  ₦
+                  {(plan.monthly_price / 100).toLocaleString(undefined, {
                     minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })}{" "}
+                  })}
                   / month
                 </p>
 
@@ -186,11 +325,23 @@ export default function SubscriptionManager() {
               </div>
 
               <button
-                onClick={() => handleUpgrade(plan)}
-                disabled={checkoutLoading}
-                className="mt-5 w-full py-2 bg-gradient-to-r from-primary to-accent text-white font-medium rounded-lg hover:opacity-90 transition disabled:opacity-50"
+                disabled={checkoutLoading || isCurrentPlan(plan)}
+                onClick={() => {
+                  if (isCurrentPlan(plan)) return;
+
+                  if (isFreePlan(plan)) {
+                    handleDowngradeToFree();
+                  } else {
+                    handleUpgrade(plan);
+                  }
+                }}
+                className="mt-5 w-full py-2 rounded-lg text-white font-medium bg-gradient-to-r from-primary to-accent disabled:opacity-50"
               >
-                {checkoutLoading ? "Processing..." : "Upgrade"}
+                {isCurrentPlan(plan)
+                  ? "Current Plan"
+                  : isFreePlan(plan)
+                  ? "Downgrade"
+                  : "Upgrade"}
               </button>
             </div>
           ))}

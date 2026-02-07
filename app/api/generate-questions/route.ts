@@ -7,6 +7,8 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
 });
 
+const QUIZ_CREDIT_COST = 5;
+
 export async function POST(req: Request) {
   try {
     const {
@@ -30,8 +32,11 @@ export async function POST(req: Request) {
       user_id,
     });
 
-    // ✅ Step 1: Usage limits
+    /**
+     * ✅ STEP 1: Usage checks
+     */
     const usageChecks = ["ai_calls", "documents_uploaded", "quizzes_created"];
+    let shouldDebitCredits = false;
 
     for (const type of usageChecks) {
       const res = await fetch(
@@ -43,13 +48,21 @@ export async function POST(req: Request) {
         }
       );
 
+      const data = await res.json();
+
       if (res.status === 403) {
-        const data = await res.json();
         return NextResponse.json(data, { status: 403 });
+      }
+
+      // 👇 ONLY quizzes_created can require credits
+      if (type === "quizzes_created" && data.shouldDebitCredits === true) {
+        shouldDebitCredits = true;
       }
     }
 
-    // ✅ Step 2: Fetch document
+    /**
+     * ✅ STEP 2: Fetch document
+     */
     const { data: document, error: docError } = await supabaseServer
       .from("documents")
       .select("storage_path, mime, filename")
@@ -69,7 +82,9 @@ export async function POST(req: Request) {
     const buffer = Buffer.from(await fileData.arrayBuffer());
     const mime = document.mime.toLowerCase();
 
-    // ✅ Step 3: Extract text
+    /**
+     * ✅ STEP 3: Extract text (UNCHANGED)
+     */
     let extractedText = "";
 
     if (mime.includes("pdf") || document.filename.endsWith(".pdf")) {
@@ -115,7 +130,9 @@ export async function POST(req: Request) {
       throw new Error("No meaningful text extracted from document.");
     }
 
-    // ✅ Step 4: Generate questions with USEFUL explanations
+    /**
+     * ✅ STEP 4: AI generation (UNCHANGED)
+     */
     const prompt = `
 Generate ${requested_question_count} high-quality multiple-choice questions based primarily on the text below.
 
@@ -196,7 +213,9 @@ ${extractedText.slice(0, 12000)}
       throw new Error("AI response was not valid JSON.");
     }
 
-    // ✅ Step 5: Persist questions
+    /**
+     * ✅ STEP 5: Persist questions (UNCHANGED)
+     */
     for (const q of questions) {
       const { data: question, error } = await supabaseServer
         .from("questions")
@@ -205,9 +224,7 @@ ${extractedText.slice(0, 12000)}
           owner: user_id,
           type: "mcq",
           text: q.question,
-          metadata: {
-            explanation: q.explanation,
-          },
+          metadata: { explanation: q.explanation },
         })
         .select()
         .single();
@@ -225,9 +242,35 @@ ${extractedText.slice(0, 12000)}
       }
     }
 
+    /**
+     * ✅ STEP 6: Deduct credits ONCE (only if required)
+     */
+    if (shouldDebitCredits) {
+      const { data: creditRow, error } = await supabaseServer
+        .from("credits_balance")
+        .select("balance")
+        .eq("id", user_id)
+        .single();
+
+      console.log('credits deducted')
+
+      if (error || !creditRow || creditRow.balance < QUIZ_CREDIT_COST) {
+        throw new Error("Credit deduction failed after generation.");
+      }
+
+      await supabaseServer
+        .from("credits_balance")
+        .update({
+          balance: creditRow.balance - QUIZ_CREDIT_COST,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", user_id);
+    }
+
     return NextResponse.json({
       success: true,
       count: questions.length,
+      credits_used: shouldDebitCredits ? QUIZ_CREDIT_COST : 0,
     });
   } catch (err: any) {
     console.error("❌ Generation error:", err);

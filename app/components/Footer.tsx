@@ -1,4 +1,6 @@
 import { Sparkles, Twitter, Linkedin, Github, Mail } from "lucide-react";
+import Image from "next/image";
+import logo from "@/app/assets/newlogo.png"
 
 const Footer = () => {
   return (
@@ -7,12 +9,11 @@ const Footer = () => {
         {/* Logo and Tagline */}
         <div className="flex flex-col items-center md:items-start gap-3 text-center md:text-left">
           <div className="flex items-center gap-2">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary to-accent flex items-center justify-center shadow-[var(--shadow-glow)]">
-              <Sparkles className="w-6 h-6 text-white" />
-            </div>
-            <span className="text-2xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
-              Quizzler
-            </span>
+            <Image 
+        src={logo} 
+        className="h-10 w-auto object-contain" 
+        alt="New Brand Logo" 
+      />
           </div>
           <p className="text-muted-foreground max-w-sm">
             Turn your documents into engaging quizzes instantly — powered by AI.

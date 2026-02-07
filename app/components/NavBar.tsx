@@ -4,6 +4,8 @@ import { useState } from "react";
 import { Button } from "@/app/components/ui/button";
 import { Sparkles, Menu, X } from "lucide-react";
 import Link from "next/link";
+import Image from "next/image";
+import logo from "@/app/assets/newlogo.png"
 
 const Navbar = () => {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -14,12 +16,12 @@ const Navbar = () => {
         <div className="flex items-center justify-between">
           {/* Logo */}
           <Link href="/" className="flex items-center gap-2">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary to-accent flex items-center justify-center">
-              <Sparkles className="w-6 h-6 text-white" />
-            </div>
-            <span className="text-2xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
-              Quizzler
-            </span>
+            
+      <Image 
+        src={logo} 
+        className="h-10 w-auto object-contain" 
+        alt="New Brand Logo" 
+      />
           </Link>
 
           {/* Desktop Nav */}

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { supabase } from "@/lib/supabaseClient";
+import { supabaseServer } from "@/lib/supabaseServer";
 
 const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY!;
 
@@ -25,7 +25,6 @@ export async function GET(req: Request) {
     );
 
     const verifyData = await verifyResponse.json();
-
     if (!verifyData.status || verifyData.data.status !== "success") {
       console.error("❌ Payment verification failed:", verifyData);
       return NextResponse.redirect(`${process.env.NEXT_PUBLIC_BASE_URL}/dashboard?status=failed`);
@@ -34,12 +33,52 @@ export async function GET(req: Request) {
     const payment = verifyData.data;
     const metadata = payment.metadata || {};
     const userId = metadata.userId;
+
+    if (!userId) {
+      console.error("⚠️ Missing userId in payment metadata");
+      return NextResponse.redirect(`${process.env.NEXT_PUBLIC_BASE_URL}/dashboard?status=failed`);
+    }
+
+    // ----------------------------
+    // 2️⃣ Handle credit bundle purchase
+    // ----------------------------
+    if (metadata.type === "credits") {
+      const creditsToAdd = metadata.credits || 0;
+
+      if (creditsToAdd <= 0) {
+        console.error("⚠️ Invalid credits amount in metadata");
+        return NextResponse.redirect(`${process.env.NEXT_PUBLIC_BASE_URL}/dashboard?status=failed`);
+      }
+
+      // Upsert user's credits balance
+      const { error } = await supabaseServer
+        .from("credits_balance")
+        .upsert({
+          id: userId,
+          balance: supabaseServer.raw(`COALESCE(balance, 0) + ${creditsToAdd}`),
+          updated_at: new Date().toISOString(),
+        });
+
+      if (error) {
+        console.error("❌ Failed to update credits:", error.message);
+        return NextResponse.redirect(`${process.env.NEXT_PUBLIC_BASE_URL}/dashboard?status=error`);
+      }
+
+      console.log(`✅ Added ${creditsToAdd} credits to user ${userId}`);
+      return NextResponse.redirect(`${process.env.NEXT_PUBLIC_BASE_URL}/dashboard?status=success&credits=${creditsToAdd}`);
+    }
+
+    // ----------------------------
+    // 3️⃣ Handle subscription purchase (existing logic)
+    // ----------------------------
     const planId = metadata.planId;
+    if (!planId) {
+      console.error("⚠️ Missing planId in metadata for subscription purchase");
+      return NextResponse.redirect(`${process.env.NEXT_PUBLIC_BASE_URL}/dashboard?status=failed`);
+    }
 
-    console.log("✅ Payment verified for:", { userId, planId, payment });
-
-    // 2️⃣ Fetch plan from Supabase
-    const { data: plan, error: planError } = await supabase
+    // Fetch plan from Supabase
+    const { data: plan, error: planError } = await supabaseServer
       .from("plans")
       .select("id, name")
       .eq("id", planId)
@@ -50,9 +89,9 @@ export async function GET(req: Request) {
       return NextResponse.redirect(`${process.env.NEXT_PUBLIC_BASE_URL}/dashboard?status=failed`);
     }
 
-    // 3️⃣ Update user role in Supabase
-    const role = plan.name.toLowerCase(); // e.g. 'standard' or 'pro'
-    const { error: roleError } = await supabase
+    // Update user role
+    const role = plan.name.toLowerCase();
+    const { error: roleError } = await supabaseServer
       .from("users")
       .update({ role })
       .eq("id", userId);
@@ -61,11 +100,11 @@ export async function GET(req: Request) {
       console.error("⚠️ Failed to update user role:", roleError);
     }
 
-    // 4️⃣ Add or update subscription in Supabase
+    // Add or update subscription
     const currentPeriodEnd = new Date();
     currentPeriodEnd.setMonth(currentPeriodEnd.getMonth() + 1);
 
-    const { error: subError } = await supabase.from("subscriptions").upsert({
+    const { error: subError } = await supabaseServer.from("subscriptions").upsert({
       user_id: userId,
       plan_id: plan.id,
       status: "active",
@@ -77,7 +116,6 @@ export async function GET(req: Request) {
       console.error("⚠️ Failed to upsert subscription:", subError.message);
     }
 
-    // ✅ Redirect to dashboard with success message
     return NextResponse.redirect(`${process.env.NEXT_PUBLIC_BASE_URL}/dashboard?status=success`);
   } catch (err: any) {
     console.error("❌ Error verifying Paystack payment:", err);

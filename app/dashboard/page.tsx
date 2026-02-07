@@ -14,6 +14,7 @@ import {
   ChevronRight,
   X,
   Share2,
+  Coins,
 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
@@ -39,6 +40,7 @@ function DashboardInner() {
   const [showUserSettings, setShowUserSettings] = useState(false);
   const [user, setUser] = useState<any>(null);
   const [showShareModal, setShowShareModal] = useState(false);
+  const [credits, setCredits] = useState<number | null>(null);
 
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -73,6 +75,17 @@ function DashboardInner() {
       }
 
       setUser(session.user);
+
+      // 🔹 Fetch credits balance
+const { data: creditsData, error: creditsError } = await supabase
+  .from("credits_balance")
+  .select("balance")
+  .eq("id", session.user.id)
+  .single();
+
+if (!creditsError && creditsData) {
+  setCredits(creditsData.balance);
+}
 
       try {
         const { data: subData } = await supabase
@@ -111,6 +124,9 @@ function DashboardInner() {
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       if (!session) router.push("/login");
     });
+    
+
+    
 
     return () => {
       window.removeEventListener("resize", handleResize);
@@ -122,6 +138,8 @@ function DashboardInner() {
     await supabase.auth.signOut();
     router.push("/login");
   };
+  
+
 
   const renderContent = () => {
     if (showUserSettings) return <UserSettings user={user} />;
@@ -249,6 +267,24 @@ function DashboardInner() {
 
         {/* Bottom Section */}
         <div className="p-4 border-t border-border bg-card/80 backdrop-blur-sm space-y-2 mt-auto">
+        {/* Credits Balance */}
+<div
+  className={`flex items-center px-4 py-2 rounded-lg bg-muted/60 border border-border text-sm font-medium ${
+    collapsed ? "justify-center" : "justify-between"
+  }`}
+>
+  <div className="flex items-center gap-2">
+    <Coins size={16} className="text-primary" />
+    {!collapsed && <span>Credits</span>}
+  </div>
+
+  {!collapsed && (
+    <span className="font-semibold text-primary">
+      {credits !== null ? credits : "—"}
+    </span>
+  )}
+</div>
+
           <button
             onClick={() => {
               setShowUserSettings(true);
