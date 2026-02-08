@@ -35,8 +35,8 @@ export async function POST(req: Request) {
         userId,
         bundleId,
       },
-      callback_url: `${process.env.NEXT_PUBLIC_BASE_URL}/credits/success`, // optional redirect
-    };
+      callback_url: `${process.env.NEXT_PUBLIC_BASE_URL}/paystack/callback`, // optional redirect
+    }; 
 
     const response = await fetch("https://api.paystack.co/transaction/initialize", {
       method: "POST",
