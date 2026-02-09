@@ -1,3 +1,4 @@
+// app/api/paystack/webhook/route.ts
 import { NextResponse } from "next/server";
 import crypto from "crypto";
 import { supabaseServer } from "@/lib/supabaseServer";
@@ -9,7 +10,7 @@ export async function POST(req: Request) {
     const body = await req.text();
     const signature = req.headers.get("x-paystack-signature");
 
-    // ✅ Verify Paystack signature
+    // 1️⃣ Verify Paystack signature
     const hash = crypto
       .createHmac("sha512", PAYSTACK_SECRET)
       .update(body)
@@ -23,74 +24,85 @@ export async function POST(req: Request) {
     const event = JSON.parse(body);
     const { event: eventType, data } = event;
 
-    console.log(`📬 Paystack Webhook Event: ${eventType}`);
-
-    // Only handle successful charge events
     if (eventType !== "charge.success") {
       return NextResponse.json({ received: true });
     }
 
-    // Extract relevant metadata
+    const reference = data.reference;
     const metadata = data?.metadata || {};
     const userId = metadata.userId;
 
-    if (!userId) {
-      console.error("⚠️ Missing userId in metadata");
+    if (!reference || !userId) {
+      console.error("⚠️ Missing reference or userId");
       return new NextResponse("Invalid metadata", { status: 400 });
     }
 
+    // 2️⃣ Idempotency check
+    const { data: existingEvent } = await supabaseServer
+      .from("payment_events")
+      .select("reference")
+      .eq("reference", reference)
+      .single();
+
+    if (existingEvent) {
+      console.log("🔁 Webhook already processed:", reference);
+      return NextResponse.json({ received: true });
+    }
+
     // ----------------------------
-    // 1️⃣ Handle credit purchase
+    // 3️⃣ Handle CREDIT purchase
     // ----------------------------
     if (metadata.type === "credits") {
-      const creditsToAdd = metadata.credits || 0;
+      const creditsToAdd = Number(metadata.credits);
 
-      if (creditsToAdd <= 0) {
-        console.error("⚠️ Invalid credits amount in metadata");
+      if (!creditsToAdd || creditsToAdd <= 0) {
+        console.error("⚠️ Invalid credits metadata");
         return new NextResponse("Invalid credits metadata", { status: 400 });
       }
 
-      // Upsert the user's credits balance
-      const { error } = await supabaseServer
+      // Fetch current balance
+      const { data: balanceRow } = await supabaseServer
+        .from("credits_balance")
+        .select("balance")
+        .eq("id", userId)
+        .single();
+
+      const currentBalance = balanceRow?.balance ?? 0;
+
+      // Update balance
+      const { error: balanceError } = await supabaseServer
         .from("credits_balance")
         .upsert({
           id: userId,
-          balance: supabaseServer.raw(`COALESCE(balance, 0) + ${creditsToAdd}`),
+          balance: currentBalance + creditsToAdd,
           updated_at: new Date().toISOString(),
         });
 
-      if (error) {
-        console.error("❌ Failed to update credits:", error.message);
+      if (balanceError) {
+        console.error("❌ Failed to update credits:", balanceError.message);
         return new NextResponse("Failed to update credits", { status: 500 });
       }
+
+      // Record payment event
+      await supabaseServer.from("payment_events").insert({
+        reference,
+        type: "credits",
+        processed_at: new Date().toISOString(),
+      });
 
       console.log(`✅ Added ${creditsToAdd} credits to user ${userId}`);
       return NextResponse.json({ received: true });
     }
 
     // ----------------------------
-    // 2️⃣ Handle subscriptions (existing logic)
+    // 4️⃣ Handle SUBSCRIPTION purchase
     // ----------------------------
     const planId = metadata.planId;
     if (!planId) {
-      console.error("⚠️ Missing planId in metadata for subscription purchase");
+      console.error("⚠️ Missing planId in subscription metadata");
       return new NextResponse("Invalid metadata", { status: 400 });
     }
 
-    // Confirm the payment on Paystack (optional)
-    const verifyRes = await fetch(
-      `https://api.paystack.co/transaction/verify/${data.reference}`,
-      {
-        headers: { Authorization: `Bearer ${PAYSTACK_SECRET}` },
-      }
-    );
-    const verifyData = await verifyRes.json();
-    if (!verifyData.status || verifyData.data.status !== "success") {
-      console.error("⚠️ Payment verification failed:", verifyData.message);
-      return new NextResponse("Payment verification failed", { status: 400 });
-    }
-
-    // Fetch plan details
     const { data: plan, error: planError } = await supabaseServer
       .from("plans")
       .select("id, name")
@@ -98,15 +110,14 @@ export async function POST(req: Request) {
       .single();
 
     if (planError || !plan) {
-      console.error("❌ Plan not found in database:", planError?.message);
+      console.error("❌ Plan not found");
       return new NextResponse("Plan not found", { status: 404 });
     }
 
-    // Create or update subscription
     const currentPeriodEnd = new Date();
     currentPeriodEnd.setMonth(currentPeriodEnd.getMonth() + 1);
 
-    const { error: subError } = await supabaseServer.from("subscriptions").upsert({
+    await supabaseServer.from("subscriptions").upsert({
       user_id: userId,
       plan_id: plan.id,
       status: "active",
@@ -114,33 +125,25 @@ export async function POST(req: Request) {
       created_at: new Date().toISOString(),
     });
 
-    if (subError) {
-      console.error("❌ Failed to upsert subscription:", subError.message);
-      return new NextResponse("Failed to update subscription", { status: 500 });
-    }
-
-    // Update user role
-    const newRole =
+    const role =
       plan.name.toLowerCase() === "pro"
         ? "pro"
         : plan.name.toLowerCase() === "standard"
         ? "standard"
         : "free";
 
-    const { error: userError } = await supabaseServer
-      .from("users")
-      .update({ role: newRole })
-      .eq("id", userId);
+    await supabaseServer.from("users").update({ role }).eq("id", userId);
 
-    if (userError) {
-      console.error("⚠️ Failed to update user role:", userError.message);
-    }
+    await supabaseServer.from("payment_events").insert({
+      reference,
+      type: "subscription",
+      processed_at: new Date().toISOString(),
+    });
 
-    console.log(`✅ User ${userId} upgraded to ${plan.name} plan`);
-
+    console.log(`✅ User ${userId} subscribed to ${plan.name}`);
     return NextResponse.json({ received: true });
   } catch (err: any) {
-    console.error("❌ Webhook handler error:", err.message);
+    console.error("❌ Webhook error:", err);
     return new NextResponse("Server error", { status: 500 });
   }
 }

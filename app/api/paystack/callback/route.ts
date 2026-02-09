@@ -1,18 +1,19 @@
+// app/api/paystack/callback/route.ts
 import { NextResponse } from "next/server";
-import { supabaseServer } from "@/lib/supabaseServer";
 
 const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY!;
+const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL!;
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const reference = searchParams.get("reference");
 
   if (!reference) {
-    return NextResponse.json({ error: "Missing payment reference" }, { status: 400 });
+    return NextResponse.redirect(`${BASE_URL}/dashboard?status=failed`);
   }
 
   try {
-    // 1️⃣ Verify the transaction with Paystack
+    // 1️⃣ Verify transaction with Paystack
     const verifyResponse = await fetch(
       `https://api.paystack.co/transaction/verify/${reference}`,
       {
@@ -25,100 +26,49 @@ export async function GET(req: Request) {
     );
 
     const verifyData = await verifyResponse.json();
+
     if (!verifyData.status || verifyData.data.status !== "success") {
-      console.error("❌ Payment verification failed:", verifyData);
-      return NextResponse.redirect(`${process.env.NEXT_PUBLIC_BASE_URL}/dashboard?status=failed`);
+      console.error("❌ Paystack verification failed:", verifyData);
+      return NextResponse.redirect(`${BASE_URL}/dashboard?status=failed`);
     }
 
     const payment = verifyData.data;
     const metadata = payment.metadata || {};
-    const userId = metadata.userId;
 
-    if (!userId) {
-      console.error("⚠️ Missing userId in payment metadata");
-      return NextResponse.redirect(`${process.env.NEXT_PUBLIC_BASE_URL}/dashboard?status=failed`);
+    // Safety check
+    if (!metadata.userId) {
+      console.error("⚠️ Missing userId in Paystack metadata");
+      return NextResponse.redirect(`${BASE_URL}/dashboard?status=failed`);
     }
 
+    /**
+     * IMPORTANT:
+     * - No DB writes here
+     * - Webhook handles credits & subscriptions
+     */
+
     // ----------------------------
-    // 2️⃣ Handle credit bundle purchase
+    // 2️⃣ Credits purchase → let webhook handle it
     // ----------------------------
     if (metadata.type === "credits") {
-      const creditsToAdd = metadata.credits || 0;
-
-      if (creditsToAdd <= 0) {
-        console.error("⚠️ Invalid credits amount in metadata");
-        return NextResponse.redirect(`${process.env.NEXT_PUBLIC_BASE_URL}/dashboard?status=failed`);
-      }
-
-      // Upsert user's credits balance
-      const { error } = await supabaseServer
-        .from("credits_balance")
-        .upsert({
-          id: userId,
-          balance: supabaseServer.raw(`COALESCE(balance, 0) + ${creditsToAdd}`),
-          updated_at: new Date().toISOString(),
-        });
-
-      if (error) {
-        console.error("❌ Failed to update credits:", error.message);
-        return NextResponse.redirect(`${process.env.NEXT_PUBLIC_BASE_URL}/dashboard?status=error`);
-      }
-
-      console.log(`✅ Added ${creditsToAdd} credits to user ${userId}`);
-      return NextResponse.redirect(`${process.env.NEXT_PUBLIC_BASE_URL}/dashboard?status=success&credits=${creditsToAdd}`);
+      return NextResponse.redirect(
+        `${BASE_URL}/dashboard?status=processing`
+      );
     }
 
     // ----------------------------
-    // 3️⃣ Handle subscription purchase (existing logic)
+    // 3️⃣ Subscription purchase → let webhook handle it
     // ----------------------------
-    const planId = metadata.planId;
-    if (!planId) {
-      console.error("⚠️ Missing planId in metadata for subscription purchase");
-      return NextResponse.redirect(`${process.env.NEXT_PUBLIC_BASE_URL}/dashboard?status=failed`);
+    if (metadata.planId) {
+      return NextResponse.redirect(
+        `${BASE_URL}/dashboard?status=processing`
+      );
     }
 
-    // Fetch plan from Supabase
-    const { data: plan, error: planError } = await supabaseServer
-      .from("plans")
-      .select("id, name")
-      .eq("id", planId)
-      .single();
-
-    if (planError || !plan) {
-      console.error("⚠️ Plan not found in Supabase:", planError);
-      return NextResponse.redirect(`${process.env.NEXT_PUBLIC_BASE_URL}/dashboard?status=failed`);
-    }
-
-    // Update user role
-    const role = plan.name.toLowerCase();
-    const { error: roleError } = await supabaseServer
-      .from("users")
-      .update({ role })
-      .eq("id", userId);
-
-    if (roleError) {
-      console.error("⚠️ Failed to update user role:", roleError);
-    }
-
-    // Add or update subscription
-    const currentPeriodEnd = new Date();
-    currentPeriodEnd.setMonth(currentPeriodEnd.getMonth() + 1);
-
-    const { error: subError } = await supabaseServer.from("subscriptions").upsert({
-      user_id: userId,
-      plan_id: plan.id,
-      status: "active",
-      current_period_end: currentPeriodEnd.toISOString(),
-      created_at: new Date().toISOString(),
-    });
-
-    if (subError) {
-      console.error("⚠️ Failed to upsert subscription:", subError.message);
-    }
-
-    return NextResponse.redirect(`${process.env.NEXT_PUBLIC_BASE_URL}/dashboard?status=success`);
+    // Fallback (should never happen)
+    return NextResponse.redirect(`${BASE_URL}/dashboard?status=success`);
   } catch (err: any) {
-    console.error("❌ Error verifying Paystack payment:", err);
-    return NextResponse.redirect(`${process.env.NEXT_PUBLIC_BASE_URL}/dashboard?status=error`);
+    console.error("❌ Paystack callback error:", err);
+    return NextResponse.redirect(`${BASE_URL}/dashboard?status=error`);
   }
 }
