@@ -1,7 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Check, Sparkles, GraduationCap, Rocket } from "lucide-react";
+import {
+  Check,
+  Sparkles,
+  GraduationCap,
+  Rocket,
+  CreditCard,
+  Globe,
+  Coins,
+} from "lucide-react";
 import Navbar from "../components/NavBar";
 import Footer from "../components/Footer";
 
@@ -59,6 +67,28 @@ const plans = [
   },
 ];
 
+const creditBundles = [
+  {
+    id: "small",
+    name: "Starter Credits",
+    credits: 5,
+    price: 200,
+  },
+  {
+    id: "medium",
+    name: "Boost Pack",
+    credits: 15,
+    price: 500,
+    popular: true,
+  },
+  {
+    id: "large",
+    name: "Power Pack",
+    credits: 35,
+    price: 1000,
+  },
+];
+
 export default function PricingPage() {
   const [usdRate, setUsdRate] = useState<number | null>(null);
 
@@ -66,16 +96,13 @@ export default function PricingPage() {
   useEffect(() => {
     async function fetchRate() {
       try {
-        const res = await fetch("https://api.exchangerate-api.com/v4/latest/NGN");
+        const res = await fetch(
+          "https://api.exchangerate-api.com/v4/latest/NGN"
+        );
         const data = await res.json();
-
-        // Correct conversion: 1 NGN -> USD
         setUsdRate(data.rates.USD);
-      } catch (err) {
-        console.error("FX fetch failed:", err);
-
-        // fallback rate
-        setUsdRate(0.00065);
+      } catch {
+        setUsdRate(0.00065); // fallback
       }
     }
     fetchRate();
@@ -85,57 +112,67 @@ export default function PricingPage() {
     <div className="min-h-screen flex flex-col bg-background text-foreground">
       <Navbar />
 
-      {/* Hero Section */}
+      {/* Hero */}
       <section className="py-20 text-center bg-gradient-to-r from-primary/10 to-accent/10">
         <div className="container mx-auto px-6">
           <h1 className="text-4xl sm:text-5xl font-bold mb-4 bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
-            Choose the Plan That Fits You
+            Flexible Pricing for Every Learner
           </h1>
           <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-            Start free and upgrade anytime — whether you’re a learner, educator, or institution.
+            Subscribe monthly or buy credits when you need them. Upgrade anytime.
           </p>
+
+          {/* International Payments */}
+          <div className="mt-6 flex items-center justify-center gap-2 text-sm text-muted-foreground">
+            <Globe className="w-4 h-4" />
+            <span>
+              International payments supported 
+            </span>
+          </div>
         </div>
       </section>
 
-      {/* Pricing Section */}
+      {/* Subscription Plans */}
       <section className="py-20">
         <div className="container mx-auto px-6 grid gap-10 md:grid-cols-3">
           {plans.map((plan) => (
             <div
               key={plan.id}
-              className={`rounded-2xl border border-border bg-card p-8 shadow-md hover:shadow-lg transition relative ${
+              className={`rounded-2xl border bg-card p-8 shadow-md transition relative ${
                 plan.highlight
                   ? "ring-2 ring-primary ring-offset-2 ring-offset-background"
                   : ""
               }`}
             >
-              {/* Icon & Title */}
               <div className="flex items-center gap-3 mb-4">
-                <div className="p-3 bg-primary/10 rounded-lg">{plan.icon}</div>
+                <div className="p-3 bg-primary/10 rounded-lg">
+                  {plan.icon}
+                </div>
                 <h2 className="text-2xl font-bold">{plan.name}</h2>
               </div>
 
-              <p className="text-muted-foreground mb-6">{plan.description}</p>
+              <p className="text-muted-foreground mb-6">
+                {plan.description}
+              </p>
 
-              {/* Price */}
               <div className="mb-6">
                 <span className="text-4xl font-bold">
                   ₦{plan.price.toLocaleString()}
                 </span>
-                <span className="text-muted-foreground text-sm">{plan.period}</span>
+                <span className="text-muted-foreground text-sm">
+                  {plan.period}
+                </span>
 
-                {/* USD Equivalent */}
                 {usdRate && (
                   <div className="text-[11px] text-muted-foreground mt-1 opacity-70">
-                    ≈ ${ (plan.price * usdRate).toFixed(2) } USD
+                    ≈ ${(plan.price * usdRate).toFixed(2)} USD
                   </div>
                 )}
               </div>
 
-              {/* Features */}
               <ul className="space-y-2 mb-6 text-sm">
                 {plan.features.map((feature, i) => (
-                  <li key={i} className="flex items-start gap-2">
+                  <li key={i} className="flex gap-2">
                     <Check className="w-4 h-4 text-primary mt-0.5" />
                     <span>{feature}</span>
                   </li>
@@ -146,8 +183,8 @@ export default function PricingPage() {
                 href="/register"
                 className={`block text-center font-semibold py-3 rounded-lg transition ${
                   plan.highlight
-                    ? "bg-gradient-to-r from-primary to-accent text-white shadow-md hover:opacity-90"
-                    : "bg-muted text-foreground hover:bg-muted/70"
+                    ? "bg-gradient-to-r from-primary to-accent text-white"
+                    : "bg-muted hover:bg-muted/70"
                 }`}
               >
                 {plan.id === "free" ? "Start for Free" : "Subscribe Now"}
@@ -157,11 +194,61 @@ export default function PricingPage() {
         </div>
       </section>
 
-      {/* CTA Section */}
+      {/* Credit Bundles */}
+      <section className="py-20 bg-muted/40">
+        <div className="container mx-auto px-6">
+          <h2 className="text-3xl font-bold text-center mb-4">
+            Need More Without Subscribing?
+          </h2>
+          <p className="text-center text-muted-foreground mb-12">
+            Buy AI credits anytime. No monthly commitment.
+          </p>
+
+          <div className="grid gap-8 md:grid-cols-3">
+            {creditBundles.map((bundle) => (
+              <div
+                key={bundle.id}
+                className={`rounded-2xl border bg-card p-8 text-center shadow-sm ${
+                  bundle.popular ? "ring-2 ring-primary" : ""
+                }`}
+              >
+                <Coins className="w-8 h-8 mx-auto mb-4 text-primary" />
+
+                <h3 className="text-xl font-bold mb-1">{bundle.name}</h3>
+                <p className="text-sm text-muted-foreground mb-4">
+                  {bundle.credits} AI credits
+                </p>
+
+                <div className="text-3xl font-bold mb-1">
+                  ₦{bundle.price.toLocaleString()}
+                </div>
+
+                {usdRate && (
+                  <div className="text-[11px] text-muted-foreground mb-6 opacity-70">
+                    ≈ ${(bundle.price * usdRate).toFixed(2)} USD
+                  </div>
+                )}
+
+                <a
+                  href="/dashboard/billing"
+                  className="block bg-primary text-white py-3 rounded-lg font-semibold hover:opacity-90 transition"
+                >
+                  Buy Credits
+                </a>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* CTA */}
       <section className="py-20 text-center bg-gradient-to-r from-primary to-accent text-white">
-        <h2 className="text-3xl font-bold mb-4">Ready to Get Started?</h2>
+        <h2 className="text-3xl font-bold mb-4">
+          Study Smarter with Quizler
+        </h2>
         <p className="mb-8 text-white/80 max-w-xl mx-auto">
-          Unlock the full power of AI quiz generation and transform your learning experience.
+          Whether you subscribe or buy credits, Quizler adapts to your learning
+          style.
         </p>
         <a
           href="/register"
