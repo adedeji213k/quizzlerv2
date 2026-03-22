@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabaseServer";
 
 const QUIZ_CREDIT_COST = 2.5;
+const FLASHCARD_CREDIT_COST = 2.5; // same as quizzes for parity
 
 // ✅ Plan limits (subscriptions only)
 const PLAN_LIMITS = {
@@ -9,16 +10,19 @@ const PLAN_LIMITS = {
     ai_calls: 50,
     documents_uploaded: -1,
     quizzes_created: 0, // handled by credits
+    flashcards_created: 0, // handled by credits
   },
   Standard: {
     ai_calls: 400,
     documents_uploaded: 15,
     quizzes_created: 15,
+    flashcards_created: 15,
   },
   Pro: {
     ai_calls: -1,
     documents_uploaded: -1,
     quizzes_created: -1,
+    flashcards_created: -1,
   },
 } as const;
 
@@ -83,20 +87,26 @@ export async function POST(req: Request) {
     }
 
     /**
-     * 3️⃣ QUIZ CREATION CHECK
+     * 3️⃣ QUIZ / FLASHCARD CREATION CHECK
      */
-    if (type === "quizzes_created") {
+    if (type === "quizzes_created" || type === "flashcards_created") {
+      const creditCost =
+        type === "quizzes_created" ? QUIZ_CREDIT_COST : FLASHCARD_CREDIT_COST;
+
       /**
        * 🟢 PAID USERS → subscription-based
        */
       if (planName !== "Free") {
-        const current = usage.quizzes_created ?? 0;
+        const current = usage[type] ?? 0;
 
         if (limit !== -1 && current >= limit) {
           return NextResponse.json(
             {
               upgrade: true,
-              message: `You’ve reached your ${planName} quiz limit.`,
+              message: `You’ve reached your ${planName} limit for ${type.replace(
+                "_",
+                " "
+              )}.`,
             },
             { status: 403 }
           );
@@ -118,11 +128,14 @@ export async function POST(req: Request) {
         .eq("id", userId)
         .single();
 
-      if (!creditRow || creditRow.balance < QUIZ_CREDIT_COST) {
+      if (!creditRow || creditRow.balance < creditCost) {
         return NextResponse.json(
           {
             upgrade: true,
-            message: `You need ${QUIZ_CREDIT_COST} credits to generate a quiz.`,
+            message: `You need ${creditCost} credits to create a ${type.replace(
+              "_",
+              " "
+            )}.`,
             balance: creditRow?.balance ?? 0,
           },
           { status: 403 }
@@ -133,12 +146,12 @@ export async function POST(req: Request) {
         success: true,
         plan: "Free",
         shouldDebitCredits: true,
-        creditCost: QUIZ_CREDIT_COST,
+        creditCost,
       });
     }
 
     /**
-     * 4️⃣ NON-QUIZ USAGE (AI calls, documents, etc.)
+     * 4️⃣ NON-QUIZ/FLASHCARD USAGE (AI calls, documents, etc.)
      */
     const current = usage[type] ?? 0;
 

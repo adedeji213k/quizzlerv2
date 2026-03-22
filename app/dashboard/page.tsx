@@ -15,6 +15,8 @@ import {
   X,
   Share2,
   Coins,
+  Layers,
+  Home,
 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
@@ -25,6 +27,8 @@ import SubscriptionManager from "../components/SubscriptionManager";
 import UserSettings from "../components/UserSettings";
 import gif from "@/app/assets/gif.gif"
 import Image from "next/image";
+import MyFlashcards from "../components/MyFlashcards";
+import Overview from "../components/Overview";
 
 interface SubscriptionInfo {
   plan: string;
@@ -32,7 +36,7 @@ interface SubscriptionInfo {
 }
 
 function DashboardInner() {
-  const [active, setActive] = useState("takeQuiz");
+  const [active, setActive] = useState("overview");
   const [loading, setLoading] = useState(true);
   const [collapsed, setCollapsed] = useState(false);
   const [subscription, setSubscription] = useState<SubscriptionInfo | null>(null);
@@ -146,10 +150,14 @@ if (!creditsError && creditsData) {
     if (showSubscriptionManager) return <SubscriptionManager />;
 
     switch (active) {
+      case "overview":
+        return <Overview setActiveTab={setActive} />;
       case "takeQuiz":
         return <TakeQuiz />;
       case "myQuizzes":
         return <MyQuizzes />;
+      case "myFlashcards":
+        return <MyFlashcards />;
       case "results":
         return <Results />;
       default:
@@ -241,8 +249,10 @@ if (!creditsError && creditsData) {
         {/* Navigation */}
         <nav className="flex-1 p-3 overflow-y-auto space-y-2 mt-2">
           {[
+            { id: "overview", label: "Overview", icon: <Home size={18} /> },
             { id: "takeQuiz", label: "Take Quiz", icon: <ClipboardList size={18} /> },
             { id: "myQuizzes", label: "My Quizzes", icon: <BookOpen size={18} /> },
+            { id: "myFlashcards", label: "My Flashcards", icon: <Layers size={18} /> },
             { id: "results", label: "Results", icon: <BarChart2 size={18} /> },
           ].map((item) => (
             <button
