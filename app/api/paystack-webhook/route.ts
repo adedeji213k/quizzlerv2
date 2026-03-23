@@ -10,7 +10,6 @@ export async function POST(req: Request) {
     const body = await req.text();
     const signature = req.headers.get("x-paystack-signature");
 
-    // 1️⃣ Verify Paystack signature
     const hash = crypto
       .createHmac("sha512", PAYSTACK_SECRET)
       .update(body)
@@ -31,13 +30,14 @@ export async function POST(req: Request) {
     const reference = data.reference;
     const metadata = data?.metadata || {};
     const userId = metadata.userId;
+    const amountPaid = data.amount / 100; // Paystack sends kobo
 
     if (!reference || !userId) {
       console.error("⚠️ Missing reference or userId");
       return new NextResponse("Invalid metadata", { status: 400 });
     }
 
-    // 2️⃣ Idempotency check
+    // 2️⃣ Idempotency
     const { data: existingEvent } = await supabaseServer
       .from("payment_events")
       .select("reference")
@@ -49,6 +49,23 @@ export async function POST(req: Request) {
       return NextResponse.json({ received: true });
     }
 
+    // 🔥 Create transaction record (used for commissions)
+    const { data: transaction, error: txError } = await supabaseServer
+      .from("transactions")
+      .insert({
+        user_id: userId,
+        amount: amountPaid,
+        type: metadata.type,
+        status: "paid",
+      })
+      .select()
+      .single();
+
+    if (txError || !transaction) {
+      console.error("❌ Failed to create transaction");
+      return new NextResponse("Transaction error", { status: 500 });
+    }
+
     // ----------------------------
     // 3️⃣ Handle CREDIT purchase
     // ----------------------------
@@ -56,11 +73,9 @@ export async function POST(req: Request) {
       const creditsToAdd = Number(metadata.credits);
 
       if (!creditsToAdd || creditsToAdd <= 0) {
-        console.error("⚠️ Invalid credits metadata");
         return new NextResponse("Invalid credits metadata", { status: 400 });
       }
 
-      // Fetch current balance
       const { data: balanceRow } = await supabaseServer
         .from("credits_balance")
         .select("balance")
@@ -69,50 +84,34 @@ export async function POST(req: Request) {
 
       const currentBalance = balanceRow?.balance ?? 0;
 
-      // Update balance
-      const { error: balanceError } = await supabaseServer
-        .from("credits_balance")
-        .upsert({
-          id: userId,
-          balance: currentBalance + creditsToAdd,
-          updated_at: new Date().toISOString(),
-        });
+      await supabaseServer.from("credits_balance").upsert({
+        id: userId,
+        balance: currentBalance + creditsToAdd,
+        updated_at: new Date().toISOString(),
+      });
 
-      if (balanceError) {
-        console.error("❌ Failed to update credits:", balanceError.message);
-        return new NextResponse("Failed to update credits", { status: 500 });
-      }
+      // 🔥 HANDLE COMMISSION (10%)
+      await handleCommission(userId, amountPaid, "credits", transaction.id);
 
-      // Record payment event
       await supabaseServer.from("payment_events").insert({
         reference,
         type: "credits",
         processed_at: new Date().toISOString(),
       });
 
-      console.log(`✅ Added ${creditsToAdd} credits to user ${userId}`);
       return NextResponse.json({ received: true });
     }
 
     // ----------------------------
-    // 4️⃣ Handle SUBSCRIPTION purchase
+    // 4️⃣ Handle SUBSCRIPTION
     // ----------------------------
     const planId = metadata.planId;
-    if (!planId) {
-      console.error("⚠️ Missing planId in subscription metadata");
-      return new NextResponse("Invalid metadata", { status: 400 });
-    }
 
-    const { data: plan, error: planError } = await supabaseServer
+    const { data: plan } = await supabaseServer
       .from("plans")
       .select("id, name")
       .eq("id", planId)
       .single();
-
-    if (planError || !plan) {
-      console.error("❌ Plan not found");
-      return new NextResponse("Plan not found", { status: 404 });
-    }
 
     const currentPeriodEnd = new Date();
     currentPeriodEnd.setMonth(currentPeriodEnd.getMonth() + 1);
@@ -134,16 +133,70 @@ export async function POST(req: Request) {
 
     await supabaseServer.from("users").update({ role }).eq("id", userId);
 
+    // 🔥 HANDLE COMMISSION (30%)
+    await handleCommission(userId, amountPaid, "subscription", transaction.id);
+
     await supabaseServer.from("payment_events").insert({
       reference,
       type: "subscription",
       processed_at: new Date().toISOString(),
     });
 
-    console.log(`✅ User ${userId} subscribed to ${plan.name}`);
     return NextResponse.json({ received: true });
+
   } catch (err: any) {
     console.error("❌ Webhook error:", err);
     return new NextResponse("Server error", { status: 500 });
   }
+}
+
+// ================================
+// 🔥 COMMISSION HANDLER
+// ================================
+async function handleCommission(
+  userId: string,
+  amount: number,
+  type: "subscription" | "credits",
+  transactionId: string
+) {
+  // 1️⃣ Get referral code from user
+  const { data: user } = await supabaseServer
+    .from("users")
+    .select("referred_by")
+    .eq("id", userId)
+    .single();
+
+  if (!user?.referred_by) return;
+
+  // 2️⃣ Find ambassador
+  const { data: ambassador } = await supabaseServer
+    .from("ambassadors")
+    .select("id")
+    .eq("referral_code", user.referred_by)
+    .single();
+
+  if (!ambassador) return;
+
+  // 3️⃣ Calculate commission
+  const rate = type === "subscription" ? 0.3 : 0.1;
+  const commissionAmount = amount * rate;
+
+  // 4️⃣ Insert commission
+  await supabaseServer.from("commissions").insert({
+    ambassador_id: ambassador.id,
+    user_id: userId,
+    transaction_id: transactionId,
+    amount_earned: commissionAmount,
+    type,
+  });
+
+  // 5️⃣ Update ambassador total
+  await supabaseServer.rpc("increment_ambassador_earnings", {
+    ambassador_id_input: ambassador.id,
+    amount_input: commissionAmount,
+  });
+
+  console.log(
+    `💰 Commission added: ₦${commissionAmount} for ambassador ${ambassador.id}`
+  );
 }

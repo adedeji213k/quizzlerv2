@@ -47,23 +47,47 @@ export default function RegisterPage() {
       if (authError) throw authError;
       if (!authData.user) throw new Error("Signup failed");
 
-      // 2️⃣ Insert user into `users` table
+      // 2️⃣ Get referral code from localStorage
+      const referralCode = localStorage.getItem("referral_code");
+      let validReferral: string | null = null;
+
+      if (referralCode) {
+        // Validate referral code exists in ambassadors table
+        const { data: ambassador, error: refError } = await supabase
+          .from("ambassadors")
+          .select("referral_code")
+          .eq("referral_code", referralCode)
+          .single();
+
+        if (!refError && ambassador) {
+          validReferral = referralCode;
+        }
+      }
+
+      // 3️⃣ Insert user into `users` table
       const { error: insertError } = await supabase.from("users").insert({
         id: authData.user.id,
         email: authData.user.email,
         name: form.name,
         role: "free",
+        referred_by: validReferral, // ✅ referral saved here
       });
 
       if (insertError) {
-        // ❌ Rollback: delete the auth user if inserting into `users` fails
+        // ❌ Rollback: delete auth user if DB insert fails
         await supabase.auth.admin.deleteUser(authData.user.id);
         throw new Error("Failed to register user in database. Registration rolled back.");
+      }
+
+      // 4️⃣ Clear referral after use
+      if (referralCode) {
+        localStorage.removeItem("referral_code");
       }
 
       alert(
         "Registration successful! Please check your email for a verification link before logging in."
       );
+
       router.push("/login");
 
     } catch (err: any) {
@@ -78,14 +102,14 @@ export default function RegisterPage() {
     <div className="relative min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-background via-muted to-background px-6">
       {/* Logo */}
       <Link href="/">
-      <div className="mb-8 flex items-center gap-3">
-        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-primary to-accent flex items-center justify-center shadow-[var(--shadow-glow)]">
-          <Sparkles className="w-6 h-6 text-white" />
+        <div className="mb-8 flex items-center gap-3">
+          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-primary to-accent flex items-center justify-center shadow-[var(--shadow-glow)]">
+            <Sparkles className="w-6 h-6 text-white" />
+          </div>
+          <span className="text-3xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
+            Quizzler
+          </span>
         </div>
-        <span className="text-3xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
-          Quizzler
-        </span>
-      </div>
       </Link>
 
       {/* Register Card */}
@@ -100,78 +124,72 @@ export default function RegisterPage() {
         <form onSubmit={handleSubmit} className="space-y-6">
           {/* Full Name */}
           <div>
-            <label htmlFor="name" className="block text-sm font-medium mb-1 text-foreground">Full Name</label>
+            <label className="block text-sm font-medium mb-1">Full Name</label>
             <input
-              id="name"
               name="name"
               type="text"
               required
               value={form.name}
               onChange={handleChange}
               placeholder="Jane Doe"
-              className="w-full px-4 py-3 rounded-lg border border-border bg-background/60 text-foreground focus:outline-none focus:ring-2 focus:ring-primary transition"
+              className="w-full px-4 py-3 rounded-lg border bg-background/60 focus:ring-2 focus:ring-primary"
             />
           </div>
 
           {/* Email */}
           <div>
-            <label htmlFor="email" className="block text-sm font-medium mb-1 text-foreground">Email</label>
+            <label className="block text-sm font-medium mb-1">Email</label>
             <input
-              id="email"
               name="email"
               type="email"
               required
               value={form.email}
               onChange={handleChange}
               placeholder="you@example.com"
-              className="w-full px-4 py-3 rounded-lg border border-border bg-background/60 text-foreground focus:outline-none focus:ring-2 focus:ring-primary transition"
+              className="w-full px-4 py-3 rounded-lg border bg-background/60 focus:ring-2 focus:ring-primary"
             />
           </div>
 
           {/* Password */}
           <div>
-            <label htmlFor="password" className="block text-sm font-medium mb-1 text-foreground">Password</label>
+            <label className="block text-sm font-medium mb-1">Password</label>
             <div className="relative">
               <input
-                id="password"
                 name="password"
                 type={showPassword ? "text" : "password"}
                 required
                 value={form.password}
                 onChange={handleChange}
-                placeholder="••••••••"
-                className="w-full px-4 py-3 rounded-lg border border-border bg-background/60 text-foreground focus:outline-none focus:ring-2 focus:ring-primary transition pr-10"
+                className="w-full px-4 py-3 rounded-lg border bg-background/60 pr-10"
               />
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
-                className="absolute inset-y-0 right-3 flex items-center text-muted-foreground hover:text-foreground"
+                className="absolute right-3 top-3"
               >
-                {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                {showPassword ? <EyeOff /> : <Eye />}
               </button>
             </div>
           </div>
 
           {/* Confirm Password */}
           <div>
-            <label htmlFor="confirmPassword" className="block text-sm font-medium mb-1 text-foreground">Confirm Password</label>
+            <label className="block text-sm font-medium mb-1">Confirm Password</label>
             <div className="relative">
               <input
-                id="confirmPassword"
                 name="confirmPassword"
                 type={showConfirm ? "text" : "password"}
                 required
                 value={form.confirmPassword}
                 onChange={handleChange}
-                placeholder="••••••••"
-                className="w-full px-4 py-3 rounded-lg border border-border bg-background/60 text-foreground focus:outline-none focus:ring-2 focus:ring-primary transition pr-10"
+                className="w-full px-4 py-3 rounded-lg border bg-background/60 pr-10"
               />
               <button
                 type="button"
                 onClick={() => setShowConfirm(!showConfirm)}
-                className="absolute inset-y-0 right-3 flex items-center text-muted-foreground hover:text-foreground"
+                className="absolute right-3 top-3"
               >
-                {showConfirm ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                {showConfirm ? <EyeOff /> : <Eye />}
               </button>
             </div>
           </div>
@@ -180,7 +198,7 @@ export default function RegisterPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-primary to-accent text-white font-medium py-3 rounded-lg shadow-md hover:opacity-90 transition disabled:opacity-50"
+            className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-primary to-accent text-white py-3 rounded-lg"
           >
             {loading ? "Creating Account..." : <>
               <UserPlus className="w-5 h-5" /> Create Account
@@ -192,13 +210,12 @@ export default function RegisterPage() {
         <div className="mt-6 text-center text-sm text-muted-foreground">
           <p>
             Already have an account?{" "}
-            <Link href="/login" className="text-primary hover:underline">Sign in</Link>
+            <Link href="/login" className="text-primary hover:underline">
+              Sign in
+            </Link>
           </p>
         </div>
       </div>
-
-      {/* Background Accent Glow */}
-      <div className="absolute inset-0 -z-10 bg-[radial-gradient(circle_at_bottom_right,hsl(var(--accent)/0.15),transparent_70%)]"></div>
     </div>
   );
 }
