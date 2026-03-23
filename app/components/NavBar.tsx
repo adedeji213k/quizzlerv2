@@ -15,14 +15,17 @@ const Navbar = () => {
       <div className="container px-4 py-4">
         <div className="flex items-center justify-between">
           {/* Logo */}
-          <Link href="/" className="flex items-center gap-2">
-            
-      <Image 
-        src={logo} 
-        className="h-10 w-auto object-contain" 
-        alt="New Brand Logo" 
-      />
-          </Link>
+          {/* Logo */}
+      <Link href="/">
+        <div className="mb-8 flex items-center gap-3">
+          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-primary to-accent flex items-center justify-center shadow-[var(--shadow-glow)]">
+            <Sparkles className="w-6 h-6 text-white" />
+          </div>
+          <span className="text-3xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
+            Quizzler
+          </span>
+        </div>
+      </Link>
 
           {/* Desktop Nav */}
           <div className="hidden md:flex items-center gap-8">

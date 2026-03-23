@@ -4,6 +4,7 @@ import { useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
 import { Sparkles, Users, Wallet, Eye, EyeOff, UserPlus } from "lucide-react";
+import Link from "next/link";
 
 export default function PartnerProgramPage() {
   const [form, setForm] = useState({
@@ -112,10 +113,21 @@ export default function PartnerProgramPage() {
         style={{ animationDelay: "0.8s" }}
       />
 
-      <div className="relative z-10 max-w-6xl w-full grid md:grid-cols-2 gap-12 items-center">
+      <div className="relative z-10 max-w-6xl w-full grid md:grid-cols-2 gap-12 ">
         
         {/* LEFT */}
         <div className="space-y-6 text-center md:text-left">
+            {/* Logo */}
+      <Link href="/">
+        <div className="mb-8 flex items-center gap-3">
+          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-primary to-accent flex items-center justify-center shadow-[var(--shadow-glow)]">
+            <Sparkles className="w-6 h-6 text-white" />
+          </div>
+          <span className="text-3xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
+            Quizzler
+          </span>
+        </div>
+      </Link>
           <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 border border-primary/20 text-primary text-sm font-medium">
             <Sparkles className="w-4 h-4" />
             Partner Program
@@ -156,6 +168,8 @@ export default function PartnerProgramPage() {
           </h2>
 
           <form onSubmit={handleSubmit} className="space-y-5">
+
+            <label className="block text-sm font-medium mb-1">Full Name</label>
             
             <input
               name="name"
@@ -167,6 +181,7 @@ export default function PartnerProgramPage() {
               className="w-full px-4 py-3 rounded-lg border border-border bg-background/60 focus:ring-2 focus:ring-primary"
             />
 
+            <label className="block text-sm font-medium mb-1">Email</label>
             <input
               name="email"
               type="email"
@@ -177,6 +192,7 @@ export default function PartnerProgramPage() {
               className="w-full px-4 py-3 rounded-lg border border-border bg-background/60 focus:ring-2 focus:ring-primary"
             />
 
+            <label className="block text-sm font-medium mb-1">Phone</label>
             <input
               name="phone"
               type="text"
@@ -187,6 +203,7 @@ export default function PartnerProgramPage() {
               className="w-full px-4 py-3 rounded-lg border border-border bg-background/60 focus:ring-2 focus:ring-primary"
             />
 
+            <label className="block text-sm font-medium mb-1">Password</label>
             {/* Password */}
             <div className="relative">
               <input
@@ -207,6 +224,7 @@ export default function PartnerProgramPage() {
               </button>
             </div>
 
+            <label className="block text-sm font-medium mb-1">Confirm Password</label>
             {/* Confirm Password */}
             <div className="relative">
               <input
