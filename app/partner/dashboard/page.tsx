@@ -200,17 +200,17 @@ const PartnerDashboard = () => {
           <table className="w-full text-left">
             <thead>
               <tr className="bg-muted/10 text-muted text-xs uppercase">
-                <th className="px-6 py-3 font-medium">Customer</th>
-                <th className="px-6 py-3 font-medium">Date</th>
-                <th className="px-6 py-3 font-medium">Status</th>
-                <th className="px-6 py-3 font-medium text-right">Commission</th>
+                <th className="px-6 py-3 text-foreground font-medium">Customer</th>
+                <th className="px-6 py-3 text-foreground font-medium">Date</th>
+                <th className="px-6 py-3 text-foreground font-medium">Status</th>
+                <th className="px-6 py-3 text-foreground font-medium text-right">Commission</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-muted/20">
               {recentReferrals.map((ref, i) => (
                 <tr key={i} className="hover:bg-muted/10 transition-colors">
                   <td className="px-6 py-4 font-medium text-foreground">{ref.users?.name || 'Unknown'}</td>
-                  <td className="px-6 py-4 text-muted text-sm">{new Date(ref.created_at).toLocaleDateString()}</td>
+                  <td className="px-6 py-4 text-foreground text-sm">{new Date(ref.created_at).toLocaleDateString()}</td>
                   <td className="px-6 py-4 text-sm">
                     <span className={`px-2 py-1 rounded-full text-xs font-medium ${ref.paid ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
                       {ref.paid ? 'Paid' : 'Pending'}
