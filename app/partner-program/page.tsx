@@ -3,7 +3,16 @@
 import { useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
-import { Sparkles, Users, Wallet, Eye, EyeOff, UserPlus } from "lucide-react";
+import {
+  Sparkles,
+  Users,
+  Wallet,
+  Eye,
+  EyeOff,
+  UserPlus,
+  TrendingUp,
+  CheckCircle,
+} from "lucide-react";
 import Link from "next/link";
 
 export default function PartnerProgramPage() {
@@ -11,6 +20,7 @@ export default function PartnerProgramPage() {
     name: "",
     email: "",
     phone: "",
+    school: "",
     password: "",
     confirmPassword: "",
   });
@@ -76,12 +86,28 @@ export default function PartnerProgramPage() {
         throw new Error("Failed to register user. Registration rolled back.");
       }
 
+      // ✅ Give partner PRO subscription
+const PRO_PLAN_ID = "YOUR_PRO_PLAN_ID"; // replace this
+
+const { error: subError } = await supabase.from("subscriptions").insert({
+  user_id: authData.user.id,
+  plan_id: PRO_PLAN_ID,
+  status: "active",
+});
+
+if (subError) {
+  await supabase.auth.admin.deleteUser(authData.user.id);
+  await supabase.from("users").delete().eq("id", authData.user.id);
+  throw new Error("Failed to assign Pro subscription.");
+}
+
       const { error: ambError } = await supabase.from("ambassadors").insert({
-        name: form.name,
-        email: form.email,
-        phone: form.phone,
-        referral_code,
-      });
+  name: form.name,
+  email: form.email,
+  phone: form.phone,
+  school: form.school, // ✅ ADD THIS
+  referral_code,
+});
 
       if (ambError) {
         await supabase.auth.admin.deleteUser(authData.user.id);
@@ -104,7 +130,6 @@ export default function PartnerProgramPage() {
 
   return (
     <section className="relative min-h-[90vh] flex items-center justify-center px-4 py-20 overflow-hidden">
-      
       {/* Background */}
       <div className="absolute inset-0 bg-[image:var(--gradient-subtle)]" />
       <div className="absolute top-10 left-1/3 w-72 h-72 bg-primary/10 rounded-full blur-3xl animate-pulse" />
@@ -114,20 +139,19 @@ export default function PartnerProgramPage() {
       />
 
       <div className="relative z-10 max-w-6xl w-full grid md:grid-cols-2 gap-12 ">
-        
         {/* LEFT */}
         <div className="space-y-6 text-center md:text-left">
-            {/* Logo */}
-      <Link href="/">
-        <div className="mb-8 flex items-center gap-3">
-          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-primary to-accent flex items-center justify-center shadow-[var(--shadow-glow)]">
-            <Sparkles className="w-6 h-6 text-white" />
-          </div>
-          <span className="text-3xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
-            Quizzler
-          </span>
-        </div>
-      </Link>
+          <Link href="/">
+            <div className="mb-8 flex items-center gap-3">
+              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-primary to-accent flex items-center justify-center shadow-[var(--shadow-glow)]">
+                <Sparkles className="w-6 h-6 text-white" />
+              </div>
+              <span className="text-3xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
+                Quizzler
+              </span>
+            </div>
+          </Link>
+
           <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 border border-primary/20 text-primary text-sm font-medium">
             <Sparkles className="w-4 h-4" />
             Partner Program
@@ -141,36 +165,74 @@ export default function PartnerProgramPage() {
           </h1>
 
           <p className="text-lg text-muted-foreground">
-            Join students across schools earning money by helping others study smarter with AI.
+            Turn your influence into income. Share Quizzler with students and
+            earn every time they subscribe or buy credits.
           </p>
 
-          <div className="space-y-4 pt-4">
+          {/* HOW IT WORKS */}
+          <div className="pt-4 space-y-3">
+            <div className="flex items-center gap-3">
+              <CheckCircle className="w-5 h-5 text-primary" />
+              <span>Share your unique referral link</span>
+            </div>
+            <div className="flex items-center gap-3">
+              <CheckCircle className="w-5 h-5 text-primary" />
+              <span>They subscribe or buy credits</span>
+            </div>
+            <div className="flex items-center gap-3">
+              <CheckCircle className="w-5 h-5 text-primary" />
+              <span>You earn real money every week</span>
+            </div>
+          </div>
+
+          {/* EARNINGS */}
+          <div className="bg-card/60 border border-border rounded-xl p-5 mt-6 space-y-3">
+            <div className="flex items-center gap-2 font-semibold">
+              <TrendingUp className="w-5 h-5 text-primary" />
+              Earnings Example
+            </div>
+
+            <p className="text-sm text-muted-foreground">
+              • Refer 10 paying students → ₦4,500 – ₦12,000/month  
+            </p>
+            <p className="text-sm text-muted-foreground"> 
+              • Refer 30 students → ₦13,500 – ₦36,000/month  
+            </p>
+            <p className="text-sm text-muted-foreground">
+              • Refer 100+ students → ₦45,000+/month
+            </p>
+
+            <p className="text-xs text-muted-foreground">
+              *You earn when users subscribe or purchase credits — not just sign
+              up.*
+            </p>
+          </div>
+
+          {/* PERKS */}
+          <div className="space-y-3 pt-4">
             <div className="flex items-center gap-3">
               <Wallet className="w-5 h-5 text-primary" />
-              <span>Earn 30% on subscriptions & 10% on credits</span>
+              <span>30% commission on subscriptions</span>
             </div>
             <div className="flex items-center gap-3">
               <Users className="w-5 h-5 text-primary" />
-              <span>Grow your influence in your school</span>
+              <span>10% on credit purchases</span>
             </div>
             <div className="flex items-center gap-3">
               <Sparkles className="w-5 h-5 text-primary" />
-              <span>Access private WhatsApp partner group</span>
+              <span>Free Pro account + private WhatsApp group</span>
             </div>
           </div>
         </div>
 
         {/* RIGHT FORM */}
         <div className="w-full max-w-md mx-auto bg-card/80 backdrop-blur-xl border border-border rounded-2xl shadow-[var(--shadow-elegant)] p-8">
-          
           <h2 className="text-xl font-semibold mb-6 text-center">
             Join the Program
           </h2>
 
+<label className="block text-sm font-medium mb-1">Full Name</label>
           <form onSubmit={handleSubmit} className="space-y-5">
-
-            <label className="block text-sm font-medium mb-1">Full Name</label>
-            
             <input
               name="name"
               type="text"
@@ -180,8 +242,7 @@ export default function PartnerProgramPage() {
               onChange={handleChange}
               className="w-full px-4 py-3 rounded-lg border border-border bg-background/60 focus:ring-2 focus:ring-primary"
             />
-
-            <label className="block text-sm font-medium mb-1">Email</label>
+<label className="block text-sm font-medium mb-1">Email</label>
             <input
               name="email"
               type="email"
@@ -192,7 +253,7 @@ export default function PartnerProgramPage() {
               className="w-full px-4 py-3 rounded-lg border border-border bg-background/60 focus:ring-2 focus:ring-primary"
             />
 
-            <label className="block text-sm font-medium mb-1">Phone</label>
+<label className="block text-sm font-medium mb-1">WhatsApp Number</label>
             <input
               name="phone"
               type="text"
@@ -203,8 +264,18 @@ export default function PartnerProgramPage() {
               className="w-full px-4 py-3 rounded-lg border border-border bg-background/60 focus:ring-2 focus:ring-primary"
             />
 
-            <label className="block text-sm font-medium mb-1">Password</label>
-            {/* Password */}
+            <label className="block text-sm font-medium mb-1">School / University</label>
+<input
+  name="school"
+  type="text"
+  required
+  placeholder="e.g. University of Lagos"
+  value={form.school}
+  onChange={handleChange}
+  className="w-full px-4 py-3 rounded-lg border border-border bg-background/60 focus:ring-2 focus:ring-primary"
+/>
+
+<label className="block text-sm font-medium mb-1">Password</label>
             <div className="relative">
               <input
                 name="password"
@@ -218,14 +289,13 @@ export default function PartnerProgramPage() {
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                className="absolute right-3 top-1/2 -translate-y-1/2"
               >
                 {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
               </button>
             </div>
 
-            <label className="block text-sm font-medium mb-1">Confirm Password</label>
-            {/* Confirm Password */}
+<label className="block text-sm font-medium mb-1">Confirm Password</label>
             <div className="relative">
               <input
                 name="confirmPassword"
@@ -239,17 +309,16 @@ export default function PartnerProgramPage() {
               <button
                 type="button"
                 onClick={() => setShowConfirm(!showConfirm)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                className="absolute right-3 top-1/2 -translate-y-1/2"
               >
                 {showConfirm ? <EyeOff size={18} /> : <Eye size={18} />}
               </button>
             </div>
 
-            {/* Button */}
             <button
               type="submit"
               disabled={loading}
-              className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-primary to-accent text-white font-medium py-3 rounded-lg shadow-md hover:opacity-90 transition disabled:opacity-50"
+              className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-primary to-accent text-white font-medium py-3 rounded-lg hover:opacity-90 transition disabled:opacity-50"
             >
               {loading ? "Joining..." : (
                 <>
@@ -261,7 +330,7 @@ export default function PartnerProgramPage() {
           </form>
 
           <p className="text-xs text-muted-foreground text-center mt-4">
-            Start earning immediately after joining.
+            Get your referral link instantly after joining.
           </p>
         </div>
       </div>
