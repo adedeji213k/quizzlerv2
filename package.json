@@ -23,6 +23,7 @@
     "pdf-parse": "^2.4.5",
     "pdf2json": "^4.0.0",
     "pdfjs-dist": "^5.4.394",
+    "posthog-js": "^1.363.5",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
     "stripe": "^19.1.0"

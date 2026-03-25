@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import { Analytics } from '@vercel/analytics/react';
+import { Analytics } from "@vercel/analytics/react";
 import ReferralTracker from "./components/ReferralTracker";
 import { Suspense } from "react";
+import { PostHogProvider } from "./providers";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -17,7 +18,8 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Quizzler",
-  description: "Upload any document and let our AI instantly create engaging quizzes. Perfect for teachers, students, and lifelong learners.",
+  description:
+    "Upload any document and let our AI instantly create engaging quizzes. Perfect for teachers, students, and lifelong learners.",
 };
 
 export default function RootLayout({
@@ -33,8 +35,8 @@ export default function RootLayout({
         <Suspense fallback={null}>
           <ReferralTracker />
         </Suspense>
-        {children}
-        <Analytics/>
+        <PostHogProvider>{children}</PostHogProvider>
+        <Analytics />
       </body>
     </html>
   );
