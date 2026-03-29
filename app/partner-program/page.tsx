@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
 import {
@@ -16,6 +16,10 @@ import {
 import Link from "next/link";
 
 export default function PartnerProgramPage() {
+  // ✅ 1. Mode State (core of everything)
+  const [mode, setMode] = useState<"new" | "existing">("new");
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+
   const [form, setForm] = useState({
     name: "",
     email: "",
@@ -30,93 +34,167 @@ export default function PartnerProgramPage() {
   const [loading, setLoading] = useState(false);
   const router = useRouter();
 
+  // ✅ 2. Detect Logged-in User (auto-fill)
+  useEffect(() => {
+    const checkUser = async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (user) {
+        setIsLoggedIn(true);
+
+        // get extra data from your users table
+        const { data: userData } = await supabase
+          .from("users")
+          .select("name, email")
+          .eq("id", user.id)
+          .single();
+
+        setForm((prev) => ({
+          ...prev,
+          name: userData?.name || "",
+          email: user.email || "",
+        }));
+      }
+    };
+
+    checkUser();
+  }, []);
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setForm({ ...form, [e.target.name]: e.target.value });
   };
 
   const generateReferralCode = (name: string) => {
-    const base = name.split(" ")[0].toLowerCase();
+    const base = name ? name.split(" ")[0].toLowerCase() : "user";
     const random = Math.floor(1000 + Math.random() * 9000);
     return `${base}${random}`;
   };
 
+  // ✅ 5. 🔥 REWRITE handleSubmit (3 FLOWS)
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-
-    if (form.password !== form.confirmPassword) {
-      alert("Passwords do not match!");
-      return;
-    }
-
     setLoading(true);
 
     try {
+      let user = null;
+      let name = form.name;
+
+      const {
+        data: { user: currentUser },
+      } = await supabase.auth.getUser();
+
+      // =========================
+      // 🟢 EXISTING USER FLOW
+      // =========================
+      if (mode === "existing") {
+        if (currentUser) {
+          user = currentUser;
+
+          // get name from DB
+          const { data } = await supabase
+            .from("users")
+            .select("name")
+            .eq("id", user.id)
+            .single();
+
+          name = data?.name || name;
+        } else {
+          // login
+          const { data: loginData, error } =
+            await supabase.auth.signInWithPassword({
+              email: form.email,
+              password: form.password,
+            });
+
+          if (error) throw new Error("Invalid login details");
+
+          user = loginData.user;
+
+          const { data } = await supabase
+            .from("users")
+            .select("name")
+            .eq("id", user.id)
+            .single();
+
+          name = data?.name || name;
+        }
+      }
+
+      // =========================
+      // 🔵 NEW USER FLOW
+      // =========================
+      if (mode === "new") {
+        if (form.password !== form.confirmPassword) {
+          throw new Error("Passwords do not match");
+        }
+
+        const { data: authData, error } = await supabase.auth.signUp({
+          email: form.email,
+          password: form.password,
+          options: {
+            data: { name: form.name },
+          },
+        });
+
+        if (error) throw error;
+        if (!authData.user) throw new Error("Signup failed");
+
+        user = authData.user;
+      }
+
+      if (!user) throw new Error("Something went wrong");
+
+      // =========================
+      // 🚫 CHECK IF ALREADY PARTNER
+      // =========================
       const { data: existing } = await supabase
         .from("ambassadors")
         .select("*")
-        .eq("email", form.email)
+        .eq("email", user.email)
         .single();
 
       if (existing) {
         throw new Error("You are already a partner.");
       }
 
-      const { data: authData, error: authError } = await supabase.auth.signUp({
-        email: form.email,
-        password: form.password,
-        options: {
-          data: { name: form.name },
-        },
-      });
+      const referral_code = generateReferralCode(name);
 
-      if (authError) throw authError;
-      if (!authData.user) throw new Error("Signup failed");
-
-      const referral_code = generateReferralCode(form.name);
-
-      const { error: userError } = await supabase.from("users").insert({
-        id: authData.user.id,
-        name: form.name,
-        email: form.email,
+      // =========================
+      // 👤 UPSERT USER (CRITICAL)
+      // =========================
+      await supabase.from("users").upsert({
+        id: user.id,
+        name,
+        email: user.email,
         role: "partner",
       });
 
-      if (userError) {
-        await supabase.auth.admin.deleteUser(authData.user.id);
-        throw new Error("Failed to register user. Registration rolled back.");
-      }
+      // =========================
+      // 💎 GIVE PRO
+      // =========================
+      const PRO_PLAN_ID = "YOUR_PRO_PLAN_ID";
 
-      // ✅ Give partner PRO subscription
-const PRO_PLAN_ID = "YOUR_PRO_PLAN_ID"; // replace this
+      await supabase.from("subscriptions").upsert({
+        user_id: user.id,
+        plan_id: PRO_PLAN_ID,
+        status: "active",
+      });
 
-const { error: subError } = await supabase.from("subscriptions").insert({
-  user_id: authData.user.id,
-  plan_id: PRO_PLAN_ID,
-  status: "active",
-});
-
-if (subError) {
-  await supabase.auth.admin.deleteUser(authData.user.id);
-  await supabase.from("users").delete().eq("id", authData.user.id);
-  throw new Error("Failed to assign Pro subscription.");
-}
-
-      const { error: ambError } = await supabase.from("ambassadors").insert({
-  name: form.name,
-  email: form.email,
-  phone: form.phone,
-  school: form.school, // ✅ ADD THIS
-  referral_code,
-});
-
-      if (ambError) {
-        await supabase.auth.admin.deleteUser(authData.user.id);
-        await supabase.from("users").delete().eq("id", authData.user.id);
-        throw new Error("Failed to register as partner. Registration rolled back.");
-      }
+      // =========================
+      // 🤝 CREATE AMBASSADOR
+      // =========================
+      await supabase.from("ambassadors").insert({
+        name,
+        email: user.email,
+        phone: form.phone,
+        school: form.school,
+        referral_code,
+      });
 
       alert(
-        `🎉 You're in!\n\nYour referral code: ${referral_code}\n\nStart sharing: quizzler.app?ref=${referral_code}`
+        `🎉 You're in!\n\nYour referral code: ${referral_code}\n\nStart sharing: quizzler.app?ref=${referral_code}`,
       );
 
       router.push("/partner/login");
@@ -193,10 +271,10 @@ if (subError) {
             </div>
 
             <p className="text-sm text-muted-foreground">
-              • Refer 10 paying students → ₦4,500 – ₦12,000/month  
+              • Refer 10 paying students → ₦4,500 – ₦12,000/month
             </p>
-            <p className="text-sm text-muted-foreground"> 
-              • Refer 30 students → ₦13,500 – ₦36,000/month  
+            <p className="text-sm text-muted-foreground">
+              • Refer 30 students → ₦13,500 – ₦36,000/month
             </p>
             <p className="text-sm text-muted-foreground">
               • Refer 100+ students → ₦45,000+/month
@@ -231,96 +309,159 @@ if (subError) {
             Join the Program
           </h2>
 
-<label className="block text-sm font-medium mb-1">Full Name</label>
+          {/* ✅ 3. ADD: Toggle UI (VERY IMPORTANT) */}
+          <div className="flex gap-2 mb-6">
+            <button
+              type="button"
+              onClick={() => setMode("new")}
+              className={`flex-1 py-2 rounded-lg border transition-colors ${
+                mode === "new" ? "bg-primary text-white" : "bg-transparent"
+              }`}
+            >
+              New User
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setMode("existing")}
+              className={`flex-1 py-2 rounded-lg border transition-colors ${
+                mode === "existing" ? "bg-primary text-white" : "bg-transparent"
+              }`}
+            >
+              Existing User
+            </button>
+          </div>
+
           <form onSubmit={handleSubmit} className="space-y-5">
-            <input
-              name="name"
-              type="text"
-              required
-              placeholder="Full Name"
-              value={form.name}
-              onChange={handleChange}
-              className="w-full px-4 py-3 rounded-lg border border-border bg-background/60 focus:ring-2 focus:ring-primary"
-            />
-<label className="block text-sm font-medium mb-1">Email</label>
-            <input
-              name="email"
-              type="email"
-              required
-              placeholder="Email Address"
-              value={form.email}
-              onChange={handleChange}
-              className="w-full px-4 py-3 rounded-lg border border-border bg-background/60 focus:ring-2 focus:ring-primary"
-            />
+            {/* ✅ 4. UPDATE FORM FIELDS (Conditional Inputs) */}
 
-<label className="block text-sm font-medium mb-1">WhatsApp Number</label>
-            <input
-              name="phone"
-              type="text"
-              required
-              placeholder="WhatsApp Number"
-              value={form.phone}
-              onChange={handleChange}
-              className="w-full px-4 py-3 rounded-lg border border-border bg-background/60 focus:ring-2 focus:ring-primary"
-            />
+            {/* 🔹 Name field (Only New Users) */}
+            {mode === "new" && (
+              <div>
+                <label className="block text-sm font-medium mb-1">
+                  Full Name
+                </label>
+                <input
+                  name="name"
+                  type="text"
+                  required
+                  placeholder="Full Name"
+                  value={form.name}
+                  onChange={handleChange}
+                  className="w-full px-4 py-3 rounded-lg border border-border bg-background/60 focus:ring-2 focus:ring-primary"
+                />
+              </div>
+            )}
 
-            <label className="block text-sm font-medium mb-1">School / University</label>
-<input
-  name="school"
-  type="text"
-  required
-  placeholder="e.g. University of Lagos"
-  value={form.school}
-  onChange={handleChange}
-  className="w-full px-4 py-3 rounded-lg border border-border bg-background/60 focus:ring-2 focus:ring-primary"
-/>
+            {/* 🔹 Email field (Not Logged In OR New User) */}
+            {(!isLoggedIn || mode === "new") && (
+              <div>
+                <label className="block text-sm font-medium mb-1">Email</label>
+                <input
+                  name="email"
+                  type="email"
+                  required
+                  placeholder="Email Address"
+                  value={form.email}
+                  onChange={handleChange}
+                  className="w-full px-4 py-3 rounded-lg border border-border bg-background/60 focus:ring-2 focus:ring-primary"
+                />
+              </div>
+            )}
 
-<label className="block text-sm font-medium mb-1">Password</label>
-            <div className="relative">
+            {/* Always show Phone and School based on your base code */}
+            <div>
+              <label className="block text-sm font-medium mb-1">
+                WhatsApp Number
+              </label>
               <input
-                name="password"
-                type={showPassword ? "text" : "password"}
+                name="phone"
+                type="text"
                 required
-                placeholder="Password"
-                value={form.password}
+                placeholder="WhatsApp Number"
+                value={form.phone}
                 onChange={handleChange}
-                className="w-full px-4 py-3 pr-12 rounded-lg border border-border bg-background/60 focus:ring-2 focus:ring-primary"
+                className="w-full px-4 py-3 rounded-lg border border-border bg-background/60 focus:ring-2 focus:ring-primary"
               />
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-3 top-1/2 -translate-y-1/2"
-              >
-                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-              </button>
             </div>
 
-<label className="block text-sm font-medium mb-1">Confirm Password</label>
-            <div className="relative">
+            <div>
+              <label className="block text-sm font-medium mb-1">
+                School / University
+              </label>
               <input
-                name="confirmPassword"
-                type={showConfirm ? "text" : "password"}
+                name="school"
+                type="text"
                 required
-                placeholder="Confirm Password"
-                value={form.confirmPassword}
+                placeholder="e.g. University of Lagos"
+                value={form.school}
                 onChange={handleChange}
-                className="w-full px-4 py-3 pr-12 rounded-lg border border-border bg-background/60 focus:ring-2 focus:ring-primary"
+                className="w-full px-4 py-3 rounded-lg border border-border bg-background/60 focus:ring-2 focus:ring-primary"
               />
-              <button
-                type="button"
-                onClick={() => setShowConfirm(!showConfirm)}
-                className="absolute right-3 top-1/2 -translate-y-1/2"
-              >
-                {showConfirm ? <EyeOff size={18} /> : <Eye size={18} />}
-              </button>
             </div>
+
+            {/* 🔹 Password field (New User OR Existing & Not Logged In) */}
+            {(mode === "new" || (mode === "existing" && !isLoggedIn)) && (
+              <div>
+                <label className="block text-sm font-medium mb-1">
+                  Password
+                </label>
+                <div className="relative">
+                  <input
+                    name="password"
+                    type={showPassword ? "text" : "password"}
+                    required
+                    placeholder="Password"
+                    value={form.password}
+                    onChange={handleChange}
+                    className="w-full px-4 py-3 pr-12 rounded-lg border border-border bg-background/60 focus:ring-2 focus:ring-primary"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  >
+                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* 🔹 Confirm Password (ONLY NEW USERS) */}
+            {mode === "new" && (
+              <div>
+                <label className="block text-sm font-medium mb-1">
+                  Confirm Password
+                </label>
+                <div className="relative">
+                  <input
+                    name="confirmPassword"
+                    type={showConfirm ? "text" : "password"}
+                    required
+                    placeholder="Confirm Password"
+                    value={form.confirmPassword}
+                    onChange={handleChange}
+                    className="w-full px-4 py-3 pr-12 rounded-lg border border-border bg-background/60 focus:ring-2 focus:ring-primary"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirm(!showConfirm)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  >
+                    {showConfirm ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
+              </div>
+            )}
 
             <button
               type="submit"
               disabled={loading}
-              className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-primary to-accent text-white font-medium py-3 rounded-lg hover:opacity-90 transition disabled:opacity-50"
+              className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-primary to-accent text-white font-medium py-3 rounded-lg hover:opacity-90 transition disabled:opacity-50 mt-2"
             >
-              {loading ? "Joining..." : (
+              {loading ? (
+                "Joining..."
+              ) : (
                 <>
                   <UserPlus className="w-5 h-5" />
                   Join Now
