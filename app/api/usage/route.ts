@@ -9,8 +9,8 @@ const PLAN_LIMITS = {
   Free: {
     ai_calls: 50,
     documents_uploaded: -1,
-    quizzes_created: 0, // handled by credits
-    flashcards_created: 0, // handled by credits
+    quizzes_created: 0, // handled by credits + 1 free
+    flashcards_created: 0, // handled by credits + 1 free
   },
   Standard: {
     ai_calls: 400,
@@ -35,7 +35,7 @@ export async function POST(req: Request) {
     if (!userId || !type) {
       return NextResponse.json(
         { error: "Missing parameters" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -105,10 +105,10 @@ export async function POST(req: Request) {
               upgrade: true,
               message: `You’ve reached your ${planName} limit for ${type.replace(
                 "_",
-                " "
+                " ",
               )}.`,
             },
-            { status: 403 }
+            { status: 403 },
           );
         }
 
@@ -120,8 +120,21 @@ export async function POST(req: Request) {
       }
 
       /**
-       * 🔵 FREE USERS → credit-based authorization only
+       * 🔵 FREE USERS → 1 FREE, THEN CREDITS
        */
+      const current = usage[type] ?? 0;
+
+      // ✅ First one is free
+      if (current < 1) {
+        return NextResponse.json({
+          success: true,
+          plan: "Free",
+          shouldDebitCredits: false,
+          isFreeUsage: true,
+        });
+      }
+
+      // 🔒 After free usage → require credits
       const { data: creditRow } = await supabaseServer
         .from("credits_balance")
         .select("balance")
@@ -134,11 +147,11 @@ export async function POST(req: Request) {
             upgrade: true,
             message: `You need ${creditCost} credits to create a ${type.replace(
               "_",
-              " "
+              " ",
             )}.`,
             balance: creditRow?.balance ?? 0,
           },
-          { status: 403 }
+          { status: 403 },
         );
       }
 
@@ -161,10 +174,10 @@ export async function POST(req: Request) {
           upgrade: true,
           message: `You’ve reached your ${planName} limit for ${type.replace(
             "_",
-            " "
+            " ",
           )}.`,
         },
-        { status: 403 }
+        { status: 403 },
       );
     }
 
@@ -184,7 +197,7 @@ export async function POST(req: Request) {
     console.error("❌ Usage API error:", err.message);
     return NextResponse.json(
       { error: "Failed to check usage" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

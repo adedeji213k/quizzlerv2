@@ -9,19 +9,28 @@ const openai = new OpenAI({
 
 const QUIZ_CREDIT_COST = 5;
 
+// ✅ Safe decode utility (prevents URI malformed crash)
+const safeDecode = (str: string) => {
+  try {
+    return decodeURIComponent(str);
+  } catch {
+    return str;
+  }
+};
+
+// ✅ Optional cleaner
+const cleanText = (str: string) =>
+  safeDecode(str).replace(/\+/g, " ").replace(/\s+/g, " ").trim();
+
 export async function POST(req: Request) {
   try {
-    const {
-      quiz_id,
-      document_id,
-      requested_question_count,
-      user_id,
-    } = await req.json();
+    const { quiz_id, document_id, requested_question_count, user_id } =
+      await req.json();
 
     if (!quiz_id || !document_id || !requested_question_count || !user_id) {
       return NextResponse.json(
         { error: "Missing required fields" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -39,14 +48,11 @@ export async function POST(req: Request) {
     let shouldDebitCredits = false;
 
     for (const type of usageChecks) {
-      const res = await fetch(
-        `${process.env.NEXT_PUBLIC_BASE_URL}/api/usage`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userId: user_id, type }),
-        }
-      );
+      const res = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/api/usage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: user_id, type }),
+      });
 
       const data = await res.json();
 
@@ -54,7 +60,6 @@ export async function POST(req: Request) {
         return NextResponse.json(data, { status: 403 });
       }
 
-      // 👇 ONLY quizzes_created can require credits
       if (type === "quizzes_created" && data.shouldDebitCredits === true) {
         shouldDebitCredits = true;
       }
@@ -83,7 +88,7 @@ export async function POST(req: Request) {
     const mime = document.mime.toLowerCase();
 
     /**
-     * ✅ STEP 3: Extract text (UNCHANGED)
+     * ✅ STEP 3: Extract text (FIXED with safeDecode)
      */
     let extractedText = "";
 
@@ -92,14 +97,15 @@ export async function POST(req: Request) {
         const pdfParser = new PDFParser();
 
         pdfParser.on("pdfParser_dataError", (err: any) =>
-          reject(new Error(err.parserError))
+          reject(new Error(err.parserError)),
         );
 
         pdfParser.on("pdfParser_dataReady", (pdfData: any) => {
           const text = pdfData.Pages.map((page: any) =>
-            page.Texts.map((t: any) =>
-              decodeURIComponent(t.R.map((r: any) => r.T).join(""))
-            ).join(" ")
+            page.Texts.map((t: any) => {
+              const raw = t.R.map((r: any) => r.T).join("");
+              return cleanText(raw);
+            }).join(" "),
           ).join("\n");
 
           resolve(text.trim());
@@ -113,10 +119,7 @@ export async function POST(req: Request) {
     ) {
       const officeParser = await import("officeparser");
       extractedText = (await officeParser.parseOfficeAsync(buffer)).trim();
-    } else if (
-      mime.includes("wordprocessingml") ||
-      mime.includes("msword")
-    ) {
+    } else if (mime.includes("wordprocessingml") || mime.includes("msword")) {
       const mammoth = await import("mammoth");
       const result = await mammoth.extractRawText({ buffer });
       extractedText = result.value.trim();
@@ -235,12 +238,28 @@ ${extractedText.slice(0, 12000)}
         await supabaseServer.from("choices").insert({
           question_id: question.id,
           text: q.choices[i],
-          is_correct:
-            q.choices[i].trim() === q.correct_answer.trim(),
+          is_correct: q.choices[i].trim() === q.correct_answer.trim(),
           position: i,
         });
       }
     }
+
+    /**
+     * ✅ NEW: Increment quizzes_created AFTER success
+     */
+    const { data: usage } = await supabaseServer
+      .from("usage")
+      .select("quizzes_created")
+      .eq("user_id", user_id)
+      .single();
+
+    await supabaseServer
+      .from("usage")
+      .update({
+        quizzes_created: (usage?.quizzes_created ?? 0) + 1,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("user_id", user_id);
 
     /**
      * ✅ STEP 6: Deduct credits ONCE (only if required)
@@ -252,7 +271,7 @@ ${extractedText.slice(0, 12000)}
         .eq("id", user_id)
         .single();
 
-      console.log('credits deducted')
+      console.log("credits deducted");
 
       if (error || !creditRow || creditRow.balance < QUIZ_CREDIT_COST) {
         throw new Error("Credit deduction failed after generation.");
@@ -276,7 +295,7 @@ ${extractedText.slice(0, 12000)}
     console.error("❌ Generation error:", err);
     return NextResponse.json(
       { error: err.message || "Unknown error occurred" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
