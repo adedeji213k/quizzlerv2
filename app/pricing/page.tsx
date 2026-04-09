@@ -22,9 +22,8 @@ const plans = [
     period: "/month",
     description: "Perfect for users exploring Quizler for the first time.",
     features: [
-      "Upload up to 3 documents per month",
-      "Generate up to 50 AI questions per month",
-      "Store up to 10 quizzes total",
+      "Create up to 1 quiz",
+      "Generate up to 50 AI questions",
       "Take quizzes and view past scores",
     ],
     highlight: false,
@@ -38,9 +37,8 @@ const plans = [
     description:
       "For teachers, students, and professionals who create quizzes regularly.",
     features: [
-      "Upload up to 15 documents per month",
-      "Generate 300–400 AI questions per month",
-      "Store up to 50 quizzes total",
+      "Create up to 15 quizzes",
+      "Generate 300–400 AI questions",
       "Take unlimited quizzes",
       "Faster AI generation speed (priority queue)",
       "Access to basic quiz analytics",
@@ -56,9 +54,8 @@ const plans = [
     description:
       "Built for institutions, educators, and teams that rely heavily on AI quiz generation.",
     features: [
-      "Unlimited document uploads",
+      "Unlimited Quiz Generation",
       "Unlimited AI question generation",
-      "Unlimited quiz storage",
       "Fastest AI generation speed",
       "Advanced analytics and performance insights",
       "Early access to new features",
@@ -97,7 +94,7 @@ export default function PricingPage() {
     async function fetchRate() {
       try {
         const res = await fetch(
-          "https://api.exchangerate-api.com/v4/latest/NGN"
+          "https://api.exchangerate-api.com/v4/latest/NGN",
         );
         const data = await res.json();
         setUsdRate(data.rates.USD);
@@ -119,15 +116,14 @@ export default function PricingPage() {
             Flexible Pricing for Every Learner
           </h1>
           <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-            Subscribe monthly or buy credits when you need them. Upgrade anytime.
+            Subscribe monthly or buy credits when you need them. Upgrade
+            anytime.
           </p>
 
           {/* International Payments */}
           <div className="mt-6 flex items-center justify-center gap-2 text-sm text-muted-foreground">
             <Globe className="w-4 h-4" />
-            <span>
-              International payments supported 
-            </span>
+            <span>International payments supported</span>
           </div>
         </div>
       </section>
@@ -145,15 +141,11 @@ export default function PricingPage() {
               }`}
             >
               <div className="flex items-center gap-3 mb-4">
-                <div className="p-3 bg-primary/10 rounded-lg">
-                  {plan.icon}
-                </div>
+                <div className="p-3 bg-primary/10 rounded-lg">{plan.icon}</div>
                 <h2 className="text-2xl font-bold">{plan.name}</h2>
               </div>
 
-              <p className="text-muted-foreground mb-6">
-                {plan.description}
-              </p>
+              <p className="text-muted-foreground mb-6">{plan.description}</p>
 
               <div className="mb-6">
                 <span className="text-4xl font-bold">
@@ -243,9 +235,7 @@ export default function PricingPage() {
 
       {/* CTA */}
       <section className="py-20 text-center bg-gradient-to-r from-primary to-accent text-white">
-        <h2 className="text-3xl font-bold mb-4">
-          Study Smarter with Quizler
-        </h2>
+        <h2 className="text-3xl font-bold mb-4">Study Smarter with Quizler</h2>
         <p className="mb-8 text-white/80 max-w-xl mx-auto">
           Whether you subscribe or buy credits, Quizler adapts to your learning
           style.
