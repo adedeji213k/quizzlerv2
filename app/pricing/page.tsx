@@ -128,8 +128,63 @@ export default function PricingPage() {
         </div>
       </section>
 
+      {/* Credit Bundles */}
+      <section className="py-20 bg-muted/40">
+        <div className="container mx-auto px-6">
+          <h2 className="text-3xl font-bold text-center mb-4">
+            Need More Without Subscribing?
+          </h2>
+          <p className="text-center text-muted-foreground mb-12">
+            Buy AI credits anytime. No monthly commitment.
+          </p>
+
+          <div className="grid gap-8 md:grid-cols-3">
+            {creditBundles.map((bundle) => (
+              <div
+                key={bundle.id}
+                className={`rounded-2xl border bg-card p-8 text-center shadow-sm ${
+                  bundle.popular ? "ring-2 ring-primary" : ""
+                }`}
+              >
+                <Coins className="w-8 h-8 mx-auto mb-4 text-primary" />
+
+                <h3 className="text-xl font-bold mb-1">{bundle.name}</h3>
+                <p className="text-sm text-muted-foreground mb-4">
+                  {bundle.credits} AI credits
+                </p>
+
+                <div className="text-3xl font-bold mb-1">
+                  ₦{bundle.price.toLocaleString()}
+                </div>
+
+                {usdRate && (
+                  <div className="text-[11px] text-muted-foreground mb-6 opacity-70">
+                    ≈ ${(bundle.price * usdRate).toFixed(2)} USD
+                  </div>
+                )}
+
+                <a
+                  href="/dashboard/billing"
+                  className="block bg-primary text-white py-3 rounded-lg font-semibold hover:opacity-90 transition"
+                >
+                  Buy Credits
+                </a>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
       {/* Subscription Plans */}
       <section className="py-20">
+        <div className="container mx-auto px-6">
+          <h2 className="text-3xl font-bold text-center mb-4">
+            Need More Value For Your Money?
+          </h2>
+          <p className="text-center text-muted-foreground mb-12">
+            Subscribe To A Monthly Plan.
+          </p>
+        </div>
         <div className="container mx-auto px-6 grid gap-10 md:grid-cols-3">
           {plans.map((plan) => (
             <div
@@ -183,53 +238,6 @@ export default function PricingPage() {
               </a>
             </div>
           ))}
-        </div>
-      </section>
-
-      {/* Credit Bundles */}
-      <section className="py-20 bg-muted/40">
-        <div className="container mx-auto px-6">
-          <h2 className="text-3xl font-bold text-center mb-4">
-            Need More Without Subscribing?
-          </h2>
-          <p className="text-center text-muted-foreground mb-12">
-            Buy AI credits anytime. No monthly commitment.
-          </p>
-
-          <div className="grid gap-8 md:grid-cols-3">
-            {creditBundles.map((bundle) => (
-              <div
-                key={bundle.id}
-                className={`rounded-2xl border bg-card p-8 text-center shadow-sm ${
-                  bundle.popular ? "ring-2 ring-primary" : ""
-                }`}
-              >
-                <Coins className="w-8 h-8 mx-auto mb-4 text-primary" />
-
-                <h3 className="text-xl font-bold mb-1">{bundle.name}</h3>
-                <p className="text-sm text-muted-foreground mb-4">
-                  {bundle.credits} AI credits
-                </p>
-
-                <div className="text-3xl font-bold mb-1">
-                  ₦{bundle.price.toLocaleString()}
-                </div>
-
-                {usdRate && (
-                  <div className="text-[11px] text-muted-foreground mb-6 opacity-70">
-                    ≈ ${(bundle.price * usdRate).toFixed(2)} USD
-                  </div>
-                )}
-
-                <a
-                  href="/dashboard/billing"
-                  className="block bg-primary text-white py-3 rounded-lg font-semibold hover:opacity-90 transition"
-                >
-                  Buy Credits
-                </a>
-              </div>
-            ))}
-          </div>
         </div>
       </section>
 
