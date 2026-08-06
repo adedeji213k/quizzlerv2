@@ -52,14 +52,18 @@ export default function FlashcardSetPage() {
   const prevCard = () => {
     setFlipped(false);
     setShowExplanation(false);
-    setCurrentIndex((prev) => (prev - 1 + flashcards.length) % flashcards.length);
+    setCurrentIndex(
+      (prev) => (prev - 1 + flashcards.length) % flashcards.length,
+    );
   };
 
   if (loading) {
     return (
       <div className="flex h-screen items-center justify-center">
         <Loader2 className="w-6 h-6 animate-spin text-primary" />
-        <span className="ml-2 text-muted-foreground">Loading flashcards...</span>
+        <span className="ml-2 text-muted-foreground">
+          Loading flashcards...
+        </span>
       </div>
     );
   }
@@ -93,41 +97,72 @@ export default function FlashcardSetPage() {
 
         {/* Flashcard */}
         <div
-          className="relative w-full h-64 cursor-pointer perspective mt-6"
+          className="flex justify-center mt-8"
           onClick={() => setFlipped((f) => !f)}
         >
-          <div
-            className={`relative w-full h-full duration-500 transform-style-preserve-3d transition-transform ${
-              flipped ? "rotate-y-180" : ""
-            } flex flex-col justify-center items-center`}
-          >
-            {/* Front */}
-            <div className="absolute w-full h-full backface-hidden bg-card rounded-2xl shadow-lg p-6 flex flex-col justify-center items-center">
-              <p className="text-lg font-semibold">{card.front}</p>
-              <p className="mt-2 text-sm text-muted-foreground">(Click to flip)</p>
-            </div>
+          <div className="relative w-full max-w-md aspect-[3/4] cursor-pointer perspective">
+            <div
+              className={`relative h-full w-full transition-transform duration-700 transform-style-preserve-3d ${
+                flipped ? "rotate-y-180" : ""
+              }`}
+            >
+              {/* FRONT */}
+              <div className="absolute inset-0 backface-hidden rounded-3xl border bg-gradient-to-b from-card to-card/90 shadow-2xl p-8 flex flex-col">
+                <span className="text-xs uppercase tracking-[0.2em] text-muted-foreground font-medium">
+                  Front
+                </span>
 
-            {/* Back */}
-            <div className="absolute w-full h-full backface-hidden rotate-y-180 bg-card rounded-2xl shadow-lg p-6 flex flex-col justify-center items-center">
-              <p className="text-lg font-semibold">{card.back}</p>
-              {card.explanation && (
-                <>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setShowExplanation((s) => !s);
-                    }}
-                    className="mt-3 px-3 py-1 bg-primary text-white rounded-lg text-sm"
-                  >
-                    {showExplanation ? "Hide Explanation" : "Show Explanation"}
-                  </button>
-                  {showExplanation && (
-                    <p className="mt-2 text-sm text-muted-foreground text-center">
-                      {card.explanation}
-                    </p>
+                <div className="flex-1 flex items-center justify-center">
+                  <p className="text-2xl font-semibold text-center leading-relaxed">
+                    {card.front}
+                  </p>
+                </div>
+
+                <p className="text-sm text-center text-muted-foreground">
+                  Click anywhere to flip
+                </p>
+              </div>
+
+              {/* BACK */}
+              <div className="absolute inset-0 rotate-y-180 backface-hidden rounded-3xl border bg-gradient-to-b from-card to-card/90 shadow-2xl p-8 flex flex-col">
+                <span className="text-xs uppercase tracking-[0.2em] text-muted-foreground font-medium">
+                  Answer
+                </span>
+
+                <div className="flex-1 flex flex-col justify-center">
+                  <p className="text-2xl font-semibold text-center leading-relaxed">
+                    {card.back}
+                  </p>
+
+                  {card.explanation && (
+                    <div className="mt-8 flex flex-col items-center">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setShowExplanation((s) => !s);
+                        }}
+                        className="rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90"
+                      >
+                        {showExplanation
+                          ? "Hide Explanation"
+                          : "View Explanation"}
+                      </button>
+
+                      {showExplanation && (
+                        <div className="mt-5 w-full rounded-2xl bg-muted/50 border p-4">
+                          <p className="text-sm leading-7 text-muted-foreground text-center">
+                            {card.explanation}
+                          </p>
+                        </div>
+                      )}
+                    </div>
                   )}
-                </>
-              )}
+                </div>
+
+                <p className="text-sm text-center text-muted-foreground">
+                  Click anywhere to flip back
+                </p>
+              </div>
             </div>
           </div>
         </div>
