@@ -110,6 +110,7 @@ export default function CreateQuizPage() {
         .from("documents")
         .insert({
           owner: user.id,
+          quiz_id: createdQuizId, // ← ADD THIS
           storage_path: filePath,
           filename: file.name,
           file_size: file.size,
@@ -214,7 +215,9 @@ export default function CreateQuizPage() {
 
           {/* Description */}
           <div>
-            <label className="block text-sm font-medium mb-1">Description</label>
+            <label className="block text-sm font-medium mb-1">
+              Description
+            </label>
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}

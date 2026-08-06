@@ -63,27 +63,32 @@ export default function MyQuizzes() {
   // ✅ Delete Quiz
   const handleDeleteQuiz = async (quizId: number, e: React.MouseEvent) => {
     e.stopPropagation();
-    const confirmDelete = confirm("Delete this quiz and its file?");
-    if (!confirmDelete) return;
+
+    if (!confirm("Delete this quiz and its document?")) return;
 
     setDeletingQuizId(quizId);
 
     try {
-      const { data: docs } = await supabase
+      // Find linked document
+      const { data: document, error: documentError } = await supabase
         .from("documents")
-        .select("id, storage_path")
+        .select("storage_path")
         .eq("quiz_id", quizId)
         .maybeSingle();
 
-      if (docs?.storage_path) {
+      if (documentError) throw documentError;
+
+      // Delete file from Storage first
+      if (document?.storage_path) {
         const { error: storageError } = await supabase.storage
           .from("documents")
-          .remove([docs.storage_path]);
-        if (storageError) throw new Error("Failed to delete storage file");
+          .remove([document.storage_path]);
 
-        await supabase.from("documents").delete().eq("id", docs.id);
+        if (storageError) throw storageError;
       }
 
+      // Delete quiz
+      // documents row will be deleted automatically via ON DELETE CASCADE
       const { error: quizError } = await supabase
         .from("quizzes")
         .delete()
@@ -92,7 +97,9 @@ export default function MyQuizzes() {
       if (quizError) throw quizError;
 
       setQuizzes((prev) => prev.filter((q) => q.id !== quizId));
+
       setSuccessMessage("Quiz deleted successfully ✅");
+
       setTimeout(() => setSuccessMessage(null), 2500);
     } catch (err: any) {
       alert("Delete failed: " + err.message);
@@ -143,7 +150,8 @@ export default function MyQuizzes() {
   if (loading) {
     return (
       <div className="flex justify-center items-center h-[60vh] text-muted-foreground text-sm sm:text-base">
-        <Loader2 className="w-6 h-6 animate-spin mr-2" /> Loading your quizzes...
+        <Loader2 className="w-6 h-6 animate-spin mr-2" /> Loading your
+        quizzes...
       </div>
     );
   }

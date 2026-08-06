@@ -57,33 +57,37 @@ export default function CreateFlashcardsPage() {
     // ✅ Usage check
     try {
       // ✅ Include flashcards_created check
-const usageTypes = ["ai_calls", "documents_uploaded", "flashcards_created"];
+      const usageTypes = [
+        "ai_calls",
+        "documents_uploaded",
+        "flashcards_created",
+      ];
 
-let shouldDebitCredits = false;
-let creditCost = 0;
+      let shouldDebitCredits = false;
+      let creditCost = 0;
 
-for (const type of usageTypes) {
-  const res = await fetch("/api/usage", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ userId: user.id, type }),
-  });
+      for (const type of usageTypes) {
+        const res = await fetch("/api/usage", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId: user.id, type }),
+        });
 
-  const data = await res.json();
+        const data = await res.json();
 
-  if (res.status === 403) {
-    setUpgradePlan(data.plan);
-    setShowUpgradeModal(true);
-    setLoading(false);
-    return;
-  }
+        if (res.status === 403) {
+          setUpgradePlan(data.plan);
+          setShowUpgradeModal(true);
+          setLoading(false);
+          return;
+        }
 
-  // ✅ Capture credit info for Free users for flashcards
-  if (type === "flashcards_created" && data.shouldDebitCredits) {
-    shouldDebitCredits = true;
-    creditCost = data.creditCost || 0;
-  }
-}
+        // ✅ Capture credit info for Free users for flashcards
+        if (type === "flashcards_created" && data.shouldDebitCredits) {
+          shouldDebitCredits = true;
+          creditCost = data.creditCost || 0;
+        }
+      }
     } catch (err) {
       alert("Usage check failed.");
       setLoading(false);

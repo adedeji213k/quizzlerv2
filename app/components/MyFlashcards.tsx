@@ -63,30 +63,36 @@ export default function MyFlashcards() {
   // ✅ Delete
   const handleDelete = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
+
     const confirmDelete = confirm("Delete this flashcard set and its file?");
+
     if (!confirmDelete) return;
 
     setDeletingId(id);
 
     try {
-      // delete document if exists
+      // Get storage file path before deleting DB records
       const { data: docs } = await supabase
         .from("documents")
-        .select("id, storage_path")
+        .select("storage_path")
         .eq("flashcard_set_id", id)
         .maybeSingle();
 
+      // Delete actual file from storage
       if (docs?.storage_path) {
         const { error: storageError } = await supabase.storage
           .from("documents")
           .remove([docs.storage_path]);
 
-        if (storageError) throw new Error("Failed to delete storage file");
-
-        await supabase.from("documents").delete().eq("id", docs.id);
+        if (storageError) {
+          throw new Error("Failed to delete storage file");
+        }
       }
 
-      // delete flashcard set (will cascade delete flashcards)
+      // Delete flashcard set
+      // Database cascades will handle:
+      // - documents
+      // - flashcards
       const { error } = await supabase
         .from("flashcard_sets")
         .delete()
@@ -95,8 +101,12 @@ export default function MyFlashcards() {
       if (error) throw error;
 
       setSets((prev) => prev.filter((s) => s.id !== id));
+
       setSuccessMessage("Flashcard set deleted ✅");
-      setTimeout(() => setSuccessMessage(null), 2500);
+
+      setTimeout(() => {
+        setSuccessMessage(null);
+      }, 2500);
     } catch (err: any) {
       alert("Delete failed: " + err.message);
     } finally {
@@ -245,9 +255,7 @@ export default function MyFlashcards() {
       {showEditModal && (
         <div className="fixed inset-0 bg-black/40 flex justify-center items-center z-50">
           <div className="bg-card p-6 rounded-xl shadow-lg w-full max-w-md">
-            <h3 className="text-xl font-semibold mb-4">
-              Edit Flashcard Set
-            </h3>
+            <h3 className="text-xl font-semibold mb-4">Edit Flashcard Set</h3>
 
             <div className="space-y-4">
               <input
