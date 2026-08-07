@@ -1,4 +1,4 @@
-'use client';
+"use client";
 
 import { useState } from "react";
 import { Sparkles, Eye, EyeOff, UserPlus } from "lucide-react";
@@ -15,6 +15,7 @@ export default function RegisterPage() {
     email: "",
     password: "",
     confirmPassword: "",
+    referralCode: "",
   });
 
   const router = useRouter();
@@ -47,21 +48,25 @@ export default function RegisterPage() {
       if (authError) throw authError;
       if (!authData.user) throw new Error("Signup failed");
 
-      // 2️⃣ Get referral code from localStorage
-      const referralCode = localStorage.getItem("referral_code");
+      // 2️⃣ Use manually entered code first, otherwise browser referral
+      const browserReferral = localStorage.getItem("referral_code");
+
+      const referralCode = form.referralCode.trim() || browserReferral;
+
       let validReferral: string | null = null;
 
       if (referralCode) {
-        // Validate referral code exists in ambassadors table
         const { data: ambassador, error: refError } = await supabase
           .from("ambassadors")
           .select("referral_code")
           .eq("referral_code", referralCode)
           .single();
 
-        if (!refError && ambassador) {
-          validReferral = referralCode;
+        if (refError || !ambassador) {
+          throw new Error("Invalid referral code.");
         }
+
+        validReferral = referralCode;
       }
 
       // 3️⃣ Insert user into `users` table
@@ -76,20 +81,21 @@ export default function RegisterPage() {
       if (insertError) {
         // ❌ Rollback: delete auth user if DB insert fails
         await supabase.auth.admin.deleteUser(authData.user.id);
-        throw new Error("Failed to register user in database. Registration rolled back.");
+        throw new Error(
+          "Failed to register user in database. Registration rolled back.",
+        );
       }
 
       // 4️⃣ Clear referral after use
-      if (referralCode) {
+      if (!form.referralCode.trim() && browserReferral) {
         localStorage.removeItem("referral_code");
       }
 
       alert(
-        "Registration successful! Please check your email for a verification link before logging in."
+        "Registration successful! Please check your email for a verification link before logging in.",
       );
 
       router.push("/login");
-
     } catch (err: any) {
       console.error("Registration error:", err);
       alert(err.message || "Failed to register");
@@ -174,7 +180,9 @@ export default function RegisterPage() {
 
           {/* Confirm Password */}
           <div>
-            <label className="block text-sm font-medium mb-1">Confirm Password</label>
+            <label className="block text-sm font-medium mb-1">
+              Confirm Password
+            </label>
             <div className="relative">
               <input
                 name="confirmPassword"
@@ -194,15 +202,40 @@ export default function RegisterPage() {
             </div>
           </div>
 
+          {/* Referral Code */}
+          <div>
+            <label className="block text-sm font-medium mb-1">
+              Referral Code{" "}
+              <span className="text-muted-foreground">(Optional)</span>
+            </label>
+
+            <input
+              name="referralCode"
+              type="text"
+              value={form.referralCode}
+              onChange={handleChange}
+              placeholder="Enter referral code"
+              className="w-full px-4 py-3 rounded-lg border bg-background/60 focus:ring-2 focus:ring-primary"
+            />
+
+            <p className="text-xs text-muted-foreground mt-1">
+              If you were referred by a Quizzler partner, enter their code here.
+            </p>
+          </div>
+
           {/* Submit */}
           <button
             type="submit"
             disabled={loading}
             className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-primary to-accent text-white py-3 rounded-lg"
           >
-            {loading ? "Creating Account..." : <>
-              <UserPlus className="w-5 h-5" /> Create Account
-            </>}
+            {loading ? (
+              "Creating Account..."
+            ) : (
+              <>
+                <UserPlus className="w-5 h-5" /> Create Account
+              </>
+            )}
           </button>
         </form>
 
