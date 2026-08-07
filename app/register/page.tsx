@@ -91,6 +91,23 @@ export default function RegisterPage() {
         localStorage.removeItem("referral_code");
       }
 
+      // 5️⃣ Send welcome email (don't fail registration if this fails)
+      try {
+        await fetch("/api/send-welcome-email", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            email: form.email,
+            name: form.name,
+          }),
+        });
+      } catch (err) {
+        console.error("Failed to send welcome email:", err);
+      }
+
+      // 6️⃣ Show success message
       alert(
         "Registration successful! Please check your email for a verification link before logging in.",
       );
